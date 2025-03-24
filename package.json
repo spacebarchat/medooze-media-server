@@ -18,7 +18,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/medooze/media-server-node.git"
+    "url": "git+https://github.com/dank074/medooze-media-server.git"
   },
   "keywords": [
     "webrtc",
@@ -29,10 +29,6 @@
   "author": "Sergio Garcia Murillo",
   "license": "MIT",
   "gypfile": true,
-  "bugs": {
-    "url": "https://github.com/medooze/media-server-node/issues"
-  },
-  "homepage": "https://github.com/medooze/media-server-node#readme",
   "dependencies": {
     "lfsr": "0.0.3",
     "medooze-event-emitter": "^1.2.0",
