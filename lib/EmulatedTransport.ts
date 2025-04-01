@@ -1,37 +1,32 @@
-const Native		= require("./Native");
-const Emitter		= require("medooze-event-emitter");
-const LFSR		= require('lfsr');
-const { v4: uuidV4 }	= require("uuid");
+import * as Native from "./Native";
+import Emitter from "medooze-event-emitter";
+import LFSR from 'lfsr';
+import {IncomingStream} from "./IncomingStream";
+import * as Utils from "./Utils";
+import {
+    SDPInfo,
+    StreamInfo,
+} from "semantic-sdp";
 
-const SemanticSDP	= require("semantic-sdp");
-const IncomingStream	= require("./IncomingStream");
+interface PlayParams {
+    start?: number;
+}
 
-const {
-	SDPInfo,
-	Setup,
-	MediaInfo,
-	CandidateInfo,
-	DTLSInfo,
-	ICEInfo,
-	StreamInfo,
-	TrackInfo,
-	SourceGroupInfo,
-} = require("semantic-sdp");
-
-const Utils		= require("./Utils");
+interface EmulatedTransportEvents {
+	stopped: (self: EmulatedTransport) => void;
+}
 
 /**
  * An emulated transport reads data from a unencrypted pcap file (typically from a transport dump), and acts like if it was a live transport from a remote peer.
  * You must create the incoming streams as signaled on the remote SDP as any incoming RTP with an unknown ssrc will be ignored. The emulated transport does not allow creating outgoing streams.
  */
-class EmulatedTransport extends Emitter
+export class EmulatedTransport extends Emitter<EmulatedTransportEvents>
 {
-	/**
-	 * @ignore
-	 * @hideconstructor
-	 * private constructor
-	 */
-	constructor(/** @type {string | Native.UDPReader} */ pcap)
+	transport: Native.PCAPTransportEmulator;
+    incomingStreams: Map<string, IncomingStream>;
+    lfsr: LFSR;
+
+	constructor(pcap: string | Native.UDPReader)
 	{
 		//Init emitter
 		super();
@@ -40,13 +35,13 @@ class EmulatedTransport extends Emitter
 		this.transport = new Native.PCAPTransportEmulator();
 		
 		//Check if it is a path or a reader
-		if (typeof pcap === "string")
+		if (typeof pcap === "string") {
 			//Open file
 			this.transport.Open(pcap);
-		else
+		} else {
 			//Set reader
 			this.transport.SetReader(pcap);
-		
+		}
 		//List of streams
 		this.incomingStreams = new Map();
 		
@@ -58,7 +53,7 @@ class EmulatedTransport extends Emitter
 	 * Set remote RTP properties 
 	 * @param {Utils.RTPProperties | SDPInfo} rtp
 	 */
-	setRemoteProperties(rtp)
+	setRemoteProperties(rtp: Utils.RTPProperties | SDPInfo)
 	{
 		//Get native properties
 		let properties = Utils.convertRTPProperties(Utils.parseRTPProperties(rtp));
@@ -71,10 +66,12 @@ class EmulatedTransport extends Emitter
 	 * @param {StreamInfo} info Contains the ids and ssrcs of the stream to be created
 	 * @returns {IncomingStream} The newly created incoming stream object
 	 */
-	createIncomingStream(info)
+	createIncomingStream(info: StreamInfo): IncomingStream
 	{
 		//We have to add the incmoing source for this stream
-		let incomingStream = new IncomingStream(this.transport,new Native.RTPReceiverFacade(this.transport),info);
+		// todo: figure out what this is actually supposed to pass
+		// @ts-expect-error
+		let incomingStream = new IncomingStream(info.id, this.transport);
 		
 		//Add to list
 		this.incomingStreams.set(incomingStream.getId(),incomingStream);
@@ -94,13 +91,14 @@ class EmulatedTransport extends Emitter
 	 * @param {Object} params	
 	 * @param {number} params.start - Set start time
 	 */
-	play(params)
+	play(params?: PlayParams)
 	{
 		//If we need to seek
-		if (params && params.start)
+		if (params && params.start) {
 			//Seek
 			return this.transport.Seek(params.start);
-		
+		}
+
 		//Start playback
 		return this.transport.Play();
 	}
@@ -108,7 +106,7 @@ class EmulatedTransport extends Emitter
 	/**
 	 * Resume playback
 	 */
-	resume()
+	resume(): boolean
 	{
 		return this.transport.Play();
 	}
@@ -116,7 +114,7 @@ class EmulatedTransport extends Emitter
 	/**
 	 * Pause playback
 	 */
-	pause()
+	pause(): boolean
 	{
 		return this.transport.Stop();
 	}
@@ -125,7 +123,7 @@ class EmulatedTransport extends Emitter
 	 * Start playback from given time
 	 * @param {Number} time - in miliseconds
 	 */
-	seek(time)
+	seek(time: number): boolean
 	{
 		this.transport.Seek(time);
 		
@@ -135,7 +133,7 @@ class EmulatedTransport extends Emitter
 	/**
 	 * Stop transport and all the associated incoming and outgoing streams
 	 */
-	stop()
+	stop(): void
 	{
 		//Don't call it twice
 		if (!this.transport) return;
@@ -151,14 +149,6 @@ class EmulatedTransport extends Emitter
 		//Stop transort
 		this.transport.Stop();
 		
-		/**
-		* Transport stopped event
-		*
-		* @name stopped
-		* @memberof EmulatedTransport
-		* @kind event
-		* @argument {EmulatedTransport} transport
-		*/
 		this.emit("stopped",this);
 
 		//Stop emitter
@@ -169,6 +159,3 @@ class EmulatedTransport extends Emitter
 		this.transport = null;
 	}
 }
-
-
-module.exports = EmulatedTransport;

@@ -1,53 +1,58 @@
-const Native	= require("./Native");
-const Emitter	= require("medooze-event-emitter");
-const IncomingStreamTrack = require("./IncomingStreamTrack");
-const OutgoingStreamTrack = require("./OutgoingStreamTrack");
-const Transponder = require("./Transponder");
-const OutgoingStream = require("./OutgoingStream");
-const SharedPointer	= require("./SharedPointer")
+import Emitter from 'medooze-event-emitter';
+import * as Native from './Native';
+import {IncomingStreamTrack} from './IncomingStreamTrack';
+import {OutgoingStreamTrack} from './OutgoingStreamTrack';
+import {Transponder} from './Transponder';
+import {OutgoingStream} from './OutgoingStream';
+import * as SharedPointer from './SharedPointer';
 
-/**
- * @typedef {Object} Multiplex
- * @property {number} multiplexId
- * @property {OutgoingStreamTrack} outgoingTrack
- * @property {Transponder} transponder
- */
+interface Multiplex {
+	multiplexId: number;
+	outgoingTrack: OutgoingStreamTrack;
+	transponder: Transponder;
+}
 
-/**
- * @typedef {Object} ActiveSpeakerMultiplexerEvents
- * @property {() => void} stopped
- * @property {(incomingStreamTrack: IncomingStreamTrack, outgoingStreamTrack: OutgoingStreamTrack) => void} activespeakerchanged New active speaker detected (`incomingStreamTrack` is track that has been voice activated, `outgoingStreamTrack` is track that has been multiplexed into)
- * @property {(outgoingStreamTrack: OutgoingStreamTrack) => void} noactivespeaker Active speaker removed (`outgoingStreamTrack` is track with no active speaker)
- */
+interface ActiveSpeakerMultiplexerEvents {
+    stopped: () => void;
+	/** New active speaker detected (`incomingStreamTrack` is track that has been voice activated, `outgoingStreamTrack` is track that has been multiplexed into)  */
+    activespeakerchanged: (incomingStreamTrack: IncomingStreamTrack, outgoingStreamTrack: OutgoingStreamTrack) => void;
+	/** Active speaker removed (`outgoingStreamTrack` is track with no active speaker) */
+    noactivespeaker: (outgoingStreamTrack: OutgoingStreamTrack) => void;
+}
 
 /**
  * ActiveSpeakerMultiplexer multiplex multiple incoming audio tracks into fewer outgoing tracks based on voice activity.
- * @extends {Emitter<ActiveSpeakerMultiplexerEvents>}
  */
-class ActiveSpeakerMultiplexer extends Emitter
+export class ActiveSpeakerMultiplexer extends Emitter<ActiveSpeakerMultiplexerEvents>
 {
-	/**
-	 * @ignore
-	 * @hideconstructor
-	 * private constructor
-	 */
+	maxId: number = 1;
+    ids: WeakMap<IncomingStreamTrack, number>;
+    speakers: Map<number, IncomingStreamTrack>;
+    multiplex: Map<number, Multiplex>;
+    multiplexer: SharedPointer.Proxy<Native.ActiveSpeakerMultiplexerFacadeShared>;
+    stopped: boolean = false;
+
+	// native callbacks
+	private onactivespeakerchanged: (speakerId: number,multiplexeId: number) => void;
+	private onactivespeakerremoved: (multiplexeId: number) => void;
+
 	constructor(
-		/** @type {Native.TimeService} */ timeService,
-		/** @type {OutgoingStream | OutgoingStreamTrack[]} */ streamOrTracks)
+		timeService: Native.TimeService,
+		streamOrTracks: OutgoingStream | OutgoingStreamTrack[])
 	{
 		//Init emitter
 		super();
 		
 		//List of the tracks associated to the speakers
 		this.maxId	= 1;
-		this.ids	= /** @type {WeakMap<IncomingStreamTrack, number>} */ (new WeakMap());
-		this.speakers	= /** @type {Map<Number, IncomingStreamTrack>} */ (new Map());
-		this.multiplex  = /** @type {Map<Number, Multiplex>} */ (new Map());
+		this.ids	= new WeakMap();
+		this.speakers	= new Map();
+		this.multiplex  = new Map();
 		
 		//Listen for speaker changes		
 		this.onactivespeakerchanged = (
-			/** @type {number} */ speakerId,
-			/** @type {number} */ multiplexeId,
+			speakerId: number,
+			multiplexeId: number,
 		) => {
 			//Get speaker track
 			const incomingStreamTrack	= this.speakers.get(speakerId);
@@ -57,7 +62,7 @@ class ActiveSpeakerMultiplexer extends Emitter
 				//Emit event
 				this.emit("activespeakerchanged",incomingStreamTrack,outgoingStreamTrack);
 		};
-		this.onactivespeakerremoved = (/** @type {number} */ multiplexeId) => {
+		this.onactivespeakerremoved = (multiplexeId: number) => {
 			//Get multiplexed track
 			const outgoingStreamTrack	= this.multiplex.get(multiplexeId)?.outgoingTrack;
 			//Prevent race condition
@@ -67,37 +72,15 @@ class ActiveSpeakerMultiplexer extends Emitter
 
 		};
 
-		
-		
-		//The listener for attached tracks end event
-		this.onTrackStopped = (/** @type {IncomingStreamTrack} */ track) => {
-			//Remove track
-			this.removeSpeaker(track);
-		};
-		//The listener for attached tracks end event
-		this.onOutgoingTrackStopped = (/** @type {OutgoingStreamTrack} */ outgoingTrack) => {
-			//Find track from multiplex
-			for (const [multiplexId,multiplex] of this.multiplex)
-			{
-				//If same track
-				if (multiplex.outgoingTrack == outgoingTrack)
-				{
-					//Remove from multiplexer
-					this.multiplexer.RemoveRTPStreamTransponder(multiplex.transponder.transponder);
-					//remove it
-					this.multiplex.delete(multiplexId);
-					//Done
-					break;
-				}
-			}
-		};
+		// bind `this` since these will be called from event handlers
+		this.onTrackStopped = this.onTrackStopped.bind(this)
+		this.onOutgoingTrackStopped = this.onOutgoingTrackStopped.bind(this)
 
 		//Create native multiplexer
-		this.multiplexer = SharedPointer(new Native.ActiveSpeakerMultiplexerFacadeShared(timeService,this));
+		this.multiplexer = SharedPointer.SharedPointer(new Native.ActiveSpeakerMultiplexerFacadeShared(timeService,this));
 
 		//Get outgoing tracks
-		//@ts-expect-error
-		const outgoingTracks = /** @type {OutgoingStreamTrack[]} */ (streamOrTracks.getTracks ? streamOrTracks.getTracks("audio") : streamOrTracks);
+		const outgoingTracks: OutgoingStreamTrack[] = (streamOrTracks instanceof OutgoingStream ? streamOrTracks.getTracks("audio") : streamOrTracks);
 
 		let multiplexId = 1;
 		//For each outgoing track
@@ -123,12 +106,36 @@ class ActiveSpeakerMultiplexer extends Emitter
 			multiplexId++;
 		}
 	}
+
+	/** The listener for attached tracks end event */
+	private onTrackStopped(track: IncomingStreamTrack) {
+		//Remove track
+		this.removeSpeaker(track);
+	}
+
+	/** The listener for attached tracks end event */
+	private onOutgoingTrackStopped(outgoingTrack: OutgoingStreamTrack) {
+		//Find track from multiplex
+		for (const [multiplexId,multiplex] of this.multiplex)
+		{
+			//If same track
+			if (multiplex.outgoingTrack == outgoingTrack)
+			{
+				//Remove from multiplexer
+				this.multiplexer.RemoveRTPStreamTransponder(multiplex.transponder.transponder);
+				//remove it
+				this.multiplex.delete(multiplexId);
+				//Done
+				break;
+			}
+		}
+	}
 	
 	/**
 	 * Maximux activity score accumulated by an speaker
 	 * @param {Number} maxAcummulatedScore
 	 */
-	setMaxAccumulatedScore(maxAcummulatedScore)
+	setMaxAccumulatedScore(maxAcummulatedScore: number)
 	{
 		this.multiplexer.SetMaxAccumulatedScore(maxAcummulatedScore);
 	}
@@ -137,7 +144,7 @@ class ActiveSpeakerMultiplexer extends Emitter
 	 * Minimum db level to not be considered as muted
 	 * @param {Number} noiseGatingThreshold
 	 */
-	setNoiseGatingThreshold(noiseGatingThreshold)
+	setNoiseGatingThreshold(noiseGatingThreshold: number)
 	{
 		this.multiplexer.SetNoiseGatingThreshold(noiseGatingThreshold);
 	}
@@ -146,7 +153,7 @@ class ActiveSpeakerMultiplexer extends Emitter
 	 * Set minimum activation score to be electible as active speaker
 	 * @param {Number} minActivationScore
 	 */
-	setMinActivationScore(minActivationScore)
+	setMinActivationScore(minActivationScore: number)
 	{
 		this.multiplexer.SetMinActivationScore(minActivationScore);
 	}
@@ -155,7 +162,7 @@ class ActiveSpeakerMultiplexer extends Emitter
 	 * Add incoming track for speaker detection
 	 * @param {IncomingStreamTrack} track
 	 */
-	addSpeaker(track) 
+	addSpeaker(track: IncomingStreamTrack) 
 	{
 		//Ensure that we don't have this trak already
 		if (this.ids.has(track))
@@ -187,7 +194,7 @@ class ActiveSpeakerMultiplexer extends Emitter
 	 * Remove track from speaker detection
 	 * @param {IncomingStreamTrack} track
 	 */
-	removeSpeaker(track) 
+	removeSpeaker(track: IncomingStreamTrack) 
 	{
 		//Get id
 		const id = this.ids.get(track);
@@ -224,11 +231,10 @@ class ActiveSpeakerMultiplexer extends Emitter
 	/**
 	 * Stop this transponder, will dettach the OutgoingStreamTrack
 	 */
-	stop()
+	stop(): void
 	{
 		//Don't stop twice
 		if (this.stopped)
-			//Do nothing
 			return;
 
 		//Stopped
@@ -272,6 +278,3 @@ class ActiveSpeakerMultiplexer extends Emitter
 	}
 	
 };
-
-
-module.exports = ActiveSpeakerMultiplexer;

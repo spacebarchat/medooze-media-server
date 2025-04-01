@@ -1,30 +1,29 @@
-const Native	= require("./Native");
-const Emitter	= require("medooze-event-emitter");
-const SharedPointer = require("./SharedPointer");
-const IncomingStreamTrack = require("./IncomingStreamTrack");
+import * as Native from './Native';
+import Emitter from 'medooze-event-emitter';
+import * as SharedPointer from './SharedPointer';
+import {IncomingStreamTrack} from './IncomingStreamTrack';
 
-/**
- * @typedef {Object} RecorderTrackEvents
- * @property {(self: RecorderTrack) => void} stopped
- * @property {(muted: boolean) => void} muted
- */
+interface RecorderTrackEvents {
+    stopped: (self: RecorderTrack) => void;
+    muted: (muted: boolean) => void;
+}
 
 /**
  * Track of the recorder associated to an incoming strem track
- * @extends {Emitter<RecorderTrackEvents>}
  */
-class RecorderTrack extends Emitter
+export class RecorderTrack extends Emitter<RecorderTrackEvents>
 {
-	/**
-	 * @ignore
-	 * @hideconstructor
-	 * private constructor
-	 */
+	id: number;
+    track: IncomingStreamTrack;
+    depacketizer: SharedPointer.Proxy<Native.RTPIncomingMediaStreamDepacketizerShared>;
+    recorder: Native.MP4RecorderFacadeShared;
+    muted: boolean;
+
 	constructor(
-		/** @type {number} */ id,
-		/** @type {IncomingStreamTrack} */ track,
-		/** @type {SharedPointer.Proxy<Native.RTPIncomingMediaStreamDepacketizerShared>} */ depacketizer,
-		/** @type {Native.MP4RecorderFacadeShared} */ recorder)
+		id: number,
+		track: IncomingStreamTrack,
+		depacketizer: SharedPointer.Proxy<Native.RTPIncomingMediaStreamDepacketizerShared>,
+		recorder: Native.MP4RecorderFacadeShared)
 	{
 		//Init emitter
 		super();
@@ -40,20 +39,23 @@ class RecorderTrack extends Emitter
 		//Start listening for frames
 		this.depacketizer.AddMediaListener(this.recorder.toMediaFrameListener());
 
-		//Listener for stop track events
-		this.onTrackStopped = () => {
-			//stop recording
-			this.stop();
-		};
+		// bind `this` since this will be called from event handler
+		this.onTrackStopped = this.onTrackStopped.bind(this);
 		
 		//Listen for track stop event
 		this.track.once("stopped", this.onTrackStopped);
 	}
+
+	/** Listener for stop track events */
+	private onTrackStopped(): void {
+		//stop recording
+		this.stop();
+	};
 	
 	/**
 	* Get recorder track id
 	*/
-	getId()
+	getId(): number
 	{
 		return this.id;
 	}
@@ -62,7 +64,7 @@ class RecorderTrack extends Emitter
 	* Get incoming stream track 
 	* @returns {IncomingStreamTrack} 
 	*/
-	getTrack()
+	getTrack(): IncomingStreamTrack
 	{
 		return this.track;
 	}
@@ -71,7 +73,7 @@ class RecorderTrack extends Emitter
 	 * Check if the track is muted or not
 	 * @returns {boolean} muted
 	 */
-	isMuted()
+	isMuted(): boolean
 	{
 		return this.muted;
 	}
@@ -81,7 +83,7 @@ class RecorderTrack extends Emitter
 	 * This operation will not change the muted state of the stream this track belongs too.
 	 * @param {boolean} muting - if we want to mute or unmute
 	 */
-	mute(muting) 
+	mute(muting: boolean): void
 	{
 		//If we are different
 		if (this.muted!==muting)
@@ -107,7 +109,7 @@ class RecorderTrack extends Emitter
 	/**
 	 * Stop recording this track
 	 */
-	stop()
+	stop(): void
 	{
 		//Don't call it twice
 		if (!this.track) return;
@@ -131,7 +133,4 @@ class RecorderTrack extends Emitter
 		//@ts-expect-error
 		this.recorder = null;
 	}
-	
 }
-
-module.exports = RecorderTrack;

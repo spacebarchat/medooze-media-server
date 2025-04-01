@@ -1,48 +1,50 @@
-const Native		= require("./Native");
-const SharedPointer	= require("./SharedPointer");
-const Emitter		= require("medooze-event-emitter");
-const LayerInfo		= require("./LayerInfo");
-const IncomingStreamTrack = require("./IncomingStreamTrack");
-const SemanticSDP	= require("semantic-sdp");
-const {
-	SDPInfo,
-	Setup,
-	MediaInfo,
-	CandidateInfo,
-	DTLSInfo,
-	ICEInfo,
-	StreamInfo,
-	TrackInfo,
-	TrackEncodingInfo,
-	SourceGroupInfo,
-} = require("semantic-sdp");
+import * as Native from "./Native";
+import * as SharedPointer from "./SharedPointer";
+import Emitter from "medooze-event-emitter";
+import {ActiveLayersInfo, Encoding, IncomingStreamTrack, IncomingStreamTrackEvents, IncomingTrackStats} from "./IncomingStreamTrack";
+import SemanticSDP, {
+    SDPInfo,
+    Setup,
+    MediaInfo,
+    CandidateInfo,
+    DTLSInfo,
+    ICEInfo,
+    StreamInfo,
+    TrackInfo,
+    TrackEncodingInfo,
+    SourceGroupInfo,
+    TrackType
+} from "semantic-sdp";
+import { SSRCs } from "./Transport";
 
 /**
- * @typedef {Object} Encoding
- * this type is like {@link IncomingStreamTrack.Encoding} except that `source` is renamed to a new `mirror`
+ * this type is like {@link Encoding} except that `source` is renamed to a new `mirror`
  * property, and then the `source` property is instead backed by a `RTPIncomingMediaStreamMultiplexer`.
- *
- * @property {string} id
- * @property {SharedPointer.Proxy<Native.RTPIncomingSourceGroupShared>} mirror
- * @property {SharedPointer.Proxy<Native.RTPIncomingMediaStreamMultiplexerShared>} source
- * @property {SharedPointer.Proxy<Native.RTPReceiverShared>} receiver
- * @property {SharedPointer.Proxy<Native.RTPIncomingMediaStreamDepacketizerShared>} depacketizer
  */
+interface EncodingMirrored {
+    id: string;
+    mirror: SharedPointer.Proxy<Native.RTPIncomingSourceGroupShared>;
+    source: SharedPointer.Proxy<Native.RTPIncomingMediaStreamMultiplexerShared>;
+    receiver: SharedPointer.Proxy<Native.RTPReceiverShared>;
+    depacketizer: SharedPointer.Proxy<Native.RTPIncomingMediaStreamDepacketizerShared>;
+}
+
 
 /**
  * Mirror incoming stream from another endpoint. Used to avoid inter-thread synchronization when attaching multiple output streams.
- * @extends {Emitter<IncomingStreamTrack.IncomingStreamTrackEvents<IncomingStreamTrackMirrored, Encoding>>}
  */
-class IncomingStreamTrackMirrored extends Emitter
+export class IncomingStreamTrackMirrored extends Emitter<IncomingStreamTrackEvents<IncomingStreamTrackMirrored, EncodingMirrored>>
 {
-	/**
-	 * @ignore
-	 * @hideconstructor
-	 * private constructor
-	 */
+	track: IncomingStreamTrack;
+    receiver: SharedPointer.Proxy<Native.RTPReceiverShared>
+    muted: boolean;
+    counter: number;
+    encodings: Map<string, EncodingMirrored>;
+    stopped: boolean;
+
 	constructor(
-		/** @type {IncomingStreamTrack} */ incomingStreamTrack,
-		/** @type {Native.TimeService} */ timeService)
+		incomingStreamTrack: IncomingStreamTrack,
+		timeService: Native.TimeService)
 	{
 		//Init emitter
 		super();
@@ -54,12 +56,13 @@ class IncomingStreamTrackMirrored extends Emitter
 		this.muted = false;
 		//Attach counter
 		this.counter	= 0;
-	
+		this.stopped = false;
+
 		//Create source map
-		this.encodings = /** @type {Map<string, Encoding>} */ (new Map());
+		this.encodings = new Map();
 
 		//Internal function for adding a new mirrored encoding to the track
-		const addEncoding = (/** @type {IncomingStreamTrack.Encoding} */ encoding) => {
+		const addEncoding = (encoding: Encoding) => {
 			//Check if we had already an encoding for it (i.e. in case of SimulcastAdapter adding and removing a trac)
 			const old = this.encodings.get(encoding.id);
 
@@ -73,7 +76,7 @@ class IncomingStreamTrackMirrored extends Emitter
 			}
 
 			//Create mirrored source
-			const source = SharedPointer(new Native.RTPIncomingMediaStreamMultiplexerShared(encoding.source.toRTPIncomingMediaStream(), timeService));
+			const source = SharedPointer.SharedPointer(new Native.RTPIncomingMediaStreamMultiplexerShared(encoding.source.toRTPIncomingMediaStream(), timeService));
 
 			//Get mirror encoding
 			const mirrored = {
@@ -81,7 +84,7 @@ class IncomingStreamTrackMirrored extends Emitter
 				source		: source,
 				mirror		: encoding.source,
 				receiver	: encoding.receiver,
-				depacketizer	: SharedPointer(new Native.RTPIncomingMediaStreamDepacketizerShared(source.toRTPIncomingMediaStream()))
+				depacketizer	: SharedPointer.SharedPointer(new Native.RTPIncomingMediaStreamDepacketizerShared(source.toRTPIncomingMediaStream()))
 			};
 
 			//Push new encoding
@@ -91,10 +94,11 @@ class IncomingStreamTrackMirrored extends Emitter
 		}
 
 		//For each encoding in the original track
-		for (let encoding of incomingStreamTrack.encodings.values())
+		for (let encoding of incomingStreamTrack.encodings.values()) {
 			//Add new encoding
 			addEncoding(encoding);
-		
+		}
+
 		//LIsten for new encodings
 		incomingStreamTrack.prependListener("encoding",(incomingStreamTrack,encoding) => {
 			//Add new encoding
@@ -130,7 +134,7 @@ class IncomingStreamTrackMirrored extends Emitter
 	/**
 	 * Get stats for all encodings from the original track
 	 */
-	getStats()
+	getStats(): IncomingTrackStats
 	{
 		return this.track.getStats();
 	}
@@ -138,7 +142,7 @@ class IncomingStreamTrackMirrored extends Emitter
 	/**
 	 * Get stats for all encodings from the original track
 	 */
-	async getStatsAsync()
+	async getStatsAsync(): Promise<IncomingTrackStats>
 	{
 		return this.track.getStatsAsync();
 	}
@@ -146,7 +150,7 @@ class IncomingStreamTrackMirrored extends Emitter
 	/**
 	 * Get active encodings and layers ordered by bitrate of the original track
 	 */
-	getActiveLayers()
+	getActiveLayers(): ActiveLayersInfo
 	{
 		return this.track.getActiveLayers();
 	}
@@ -154,7 +158,7 @@ class IncomingStreamTrackMirrored extends Emitter
 	/**
 	 * Get active encodings and layers ordered by bitrate of the original track
 	 */
-	async getActiveLayersAsync()
+	async getActiveLayersAsync(): Promise<ActiveLayersInfo>
 	{
 		return this.track.getActiveLayersAsync();
 	}
@@ -162,7 +166,7 @@ class IncomingStreamTrackMirrored extends Emitter
 	/**
 	* Get track id as signaled on the SDP
 	*/
-	getId()
+	getId(): string
 	{
 		return this.track.getId();
 	}
@@ -171,7 +175,7 @@ class IncomingStreamTrackMirrored extends Emitter
 	/**
 	* Get track media id (mid)
 	*/
-	getMediaId()
+	getMediaId(): string
 	{
 		return this.track.getMediaId();
 	}
@@ -180,14 +184,14 @@ class IncomingStreamTrackMirrored extends Emitter
 	 * Get track info object
 	 * @returns {TrackInfo} Track info
 	 */
-	getTrackInfo()
+	getTrackInfo(): TrackInfo
 	{
 		return this.track.getTrackInfo();
 	}
 	/**
 	 * Return ssrcs associated to this track
 	 */
-	getSSRCs()
+	getSSRCs(): { [encodingId: string]: SSRCs }
 	{
 		return this.track.getSSRCs();
 	}
@@ -196,7 +200,7 @@ class IncomingStreamTrackMirrored extends Emitter
 	* Get track media type
 	* @returns {SemanticSDP.TrackType}
 	*/
-	getMedia()
+	getMedia(): TrackType
 	{
 		return this.track.getMedia();
 	}
@@ -204,9 +208,9 @@ class IncomingStreamTrackMirrored extends Emitter
 	/**
 	 * Get all track encodings
 	 * Internal use, you'd beter know what you are doing before calling this method
-	 * @returns {Array<Encoding>} - encodings 
+	 * @returns {Array<EncodingMirrored>} - encodings 
 	 **/
-	getEncodings()
+	getEncodings(): EncodingMirrored[]
 	{
 		return Array.from(this.encodings.values());
 	}
@@ -215,9 +219,9 @@ class IncomingStreamTrackMirrored extends Emitter
 	 * Get encoding by id
 	 * Internal use, you'd beter know what you are doing before calling this method
 	 * @param {String} encodingId	- encoding Id,
-	 * @returns {Encoding | undefined}
+	 * @returns {EncodingMirrored | undefined}
 	 **/
-	getEncoding(encodingId)
+	getEncoding(encodingId: string): EncodingMirrored | undefined
 	{
 		return this.encodings.get(encodingId);
 	}
@@ -225,9 +229,9 @@ class IncomingStreamTrackMirrored extends Emitter
 	/**
 	 * Get default encoding
 	 * Internal use, you'd beter know what you are doing before calling this method
-	 * @returns {Encoding | undefined}
+	 * @returns {EncodingMirrored | undefined}
 	 **/
-	getDefaultEncoding()
+	getDefaultEncoding(): EncodingMirrored | undefined
 	{
 		//Get original default encoding
 		const original = this.track.getDefaultEncoding();
@@ -238,7 +242,7 @@ class IncomingStreamTrackMirrored extends Emitter
 	/**
 	 * Return if the track is attached or not
 	 */
-	isAttached()
+	isAttached(): boolean
 	{
 		return this.counter>0;
 	}
@@ -247,7 +251,7 @@ class IncomingStreamTrackMirrored extends Emitter
 	 * Signal that this track has been attached.
 	 * Internal use, you'd beter know what you are doing before calling this method
 	 */
-	attached() 
+	attached(): void 
 	{
 		//If we are already stopped
 		if (!this.track) return;
@@ -266,19 +270,20 @@ class IncomingStreamTrackMirrored extends Emitter
 	/** 
 	 * Request an intra refres on all sources
 	 */
-	refresh()
+	refresh(): void
 	{
 		//For each source
-		for (let encoding of this.encodings.values())
+		for (let encoding of this.encodings.values()) {
 			//Request an iframe on main ssrc
 			encoding.receiver.SendPLI(encoding.mirror.media.ssrc);
+		}
 	}
 	
 	/**
 	 * Signal that this track has been detached.
 	 * Internal use, you'd beter know what you are doing before calling this method
 	 */
-	detached()
+	detached(): void
 	{
 		//If we are already stopped
 		if (!this.track) return;
@@ -298,7 +303,7 @@ class IncomingStreamTrackMirrored extends Emitter
 	 * Check if the track is muted or not
 	 * @returns {boolean} muted
 	 */
-	isMuted()
+	isMuted(): boolean
 	{
 		return this.muted;
 	}
@@ -307,7 +312,7 @@ class IncomingStreamTrackMirrored extends Emitter
 	 * Mute/Unmute track
 	 * @param {boolean} muting - if we want to mute or unmute
 	 */
-	mute(muting) 
+	mute(muting: boolean) : void
 	{
 		//For each source
 		for (let encoding of this.encodings.values())
@@ -332,7 +337,7 @@ class IncomingStreamTrackMirrored extends Emitter
 	/**
 	 * Removes the track from the incoming stream and also detaches any attached outgoing track or recorder
 	 */
-	stop()
+	stop(): void
 	{
 		//Don't call it twice
 		if (this.stopped) return;
@@ -364,5 +369,3 @@ class IncomingStreamTrackMirrored extends Emitter
 		this.receiver = null;
 	}
 }
-
-module.exports = IncomingStreamTrackMirrored;

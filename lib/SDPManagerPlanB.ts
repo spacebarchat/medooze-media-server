@@ -1,27 +1,29 @@
-const SDPManager	= require("./SDPManager");
+import {SDPManager} from './SDPManager';
+import {
+    SDPInfo,
+    Setup,
+    MediaInfo,
+    CandidateInfo,
+    DTLSInfo,
+    ICEInfo,
+    StreamInfo,
+    TrackInfo,
+    SourceGroupInfo,
+	Capabilities,
+} from 'semantic-sdp';
+import {Endpoint} from './Endpoint';
 
-const SemanticSDP	= require("semantic-sdp");
-
-const {
-	SDPInfo,
-	Setup,
-	MediaInfo,
-	CandidateInfo,
-	DTLSInfo,
-	ICEInfo,
-	StreamInfo,
-	TrackInfo,
-	SourceGroupInfo,
-} = require("semantic-sdp");
-
-/** @typedef {import("./Endpoint")} Endpoint */
-/** @typedef {import("./Transport")} Transport */
-
-class SDPManagerPlanB extends SDPManager
+export class SDPManagerPlanB extends SDPManager
 {
+	endpoint: Endpoint;
+    capabilities: Capabilities;
+    renegotiationNeeded: boolean;
+    localInfo?: SDPInfo;
+    remoteInfo?: SDPInfo;
+
 	constructor(
-		/** @type {Endpoint} */ endpoint,
-		/** @type {SemanticSDP.Capabilities} */ capabilities)
+		endpoint: Endpoint,
+		capabilities: Capabilities)
 	{
 		//Init parent
 		super();
@@ -32,13 +34,10 @@ class SDPManagerPlanB extends SDPManager
 		
 		//Renegotiation needed flag
 		this.renegotiationNeeded = false;
-		
-		/** @type {SDPInfo | undefined} */
-		this.localInfo = undefined;
 	}
 
 	/** @override */
-	createLocalDescription()
+	createLocalDescription(): string
 	{
 		//If there is no local info
 		if (!this.localInfo)
@@ -79,7 +78,7 @@ class SDPManagerPlanB extends SDPManager
 	}
 	
 	/** @override */
-	processRemoteDescription(/** @type {string} */ sdp)
+	processRemoteDescription(sdp: string): void
 	{
 		//Renegotiate
 		const renegotiate = () => {
@@ -93,7 +92,7 @@ class SDPManagerPlanB extends SDPManager
 					//Clean flag
 					this.renegotiationNeeded = false;
 					//Emit event
-					this.emit("renegotiationneeded",this.transport);
+					this.emit("renegotiationneeded",this.transport!);
 				},0);
 			}
 		};
@@ -193,7 +192,7 @@ class SDPManagerPlanB extends SDPManager
 				//If not found
 				if (!track)
 					//Create new one
-					stream.createTrack(trackInfo);
+					stream.createTrack(trackInfo.getMedia(), trackInfo);
 			}
 		}
 		
@@ -213,7 +212,7 @@ class SDPManagerPlanB extends SDPManager
 	
 	
 	/** @override */
-	stop()
+	stop(): void
 	{
 		//Stop transport
 		if (this.transport)

@@ -1,48 +1,55 @@
-const Native		= require("./Native");
-const Emitter		= require("medooze-event-emitter");
-const IncomingStream    = require("./IncomingStream");
-const RecorderTrack	= require("./RecorderTrack");
-const Refresher		= require("./Refresher");
-const SharedPointer	= require("./SharedPointer");
-const IncomingStreamTrack = require("./IncomingStreamTrack");
+import * as Native from "./Native";
+import Emitter from "medooze-event-emitter";
+import {IncomingStream} from "./IncomingStream";
+import {RecorderTrack} from "./RecorderTrack";
+import {Refresher} from "./Refresher";
+import * as SharedPointer from "./SharedPointer";
+import {IncomingStreamTrack} from "./IncomingStreamTrack";
 
-//@ts-expect-error
-const parseInt = /** @type {(x: number) => number} */ (global.parseInt);
+export interface RecorderParams {
+	/** Periodically refresh an itnra on all video tracks (in ms) */
+    refresh?: number;
+	/** Wait until the first video iframe is received to start recording media */
+    waitForIntra?: boolean;
+	/** Buffer time in ms. Recording must be explicitly started with flush() call */
+    timeShift?: number;
+	/** Disable recording hint tracks. Note that this file won't be playable with the Player object */
+    disableHints?: boolean;
+}
 
-/**
- * @typedef {Object} RecorderParams
- * @property {number} [refresh] Periodically refresh an intra on all video tracks (in ms)
- * @property {boolean} [waitForIntra] Wait until first video iframe is received to start recording media
- * @property {number} [timeShift] Buffer time in ms. Recording must be splicity started with flush() call
- * @property {boolean} [disableHints] Disable recording hint tracks. Note that this file won't be playable with the Player object;
- */
-
-/**
- * @typedef {Object} RecorderEvents
- * @property {(self: Recorder) => void} stopped
- * @property {(self: Recorder, timestamp: number) => void} started Recorder started event. This event will be triggered when the first media frame is being recorded. (`timestamp` is the timestamp of the first frame in milliseconds).
- */
+interface RecorderEvents {
+    stopped: (self: Recorder) => void;
+	/** Recorder started event. This event will be trigered when the first media frame is being recorded. ('timestamp' is the timestamp of the first frame in milliseconds) */
+    started: (self: Recorder, timestamp: number) => void;
+}
 
 /**
  * MP4 recorder that allows to record several streams/tracks on a single mp4 file
- * @extends {Emitter<RecorderEvents>}
  */
-class Recorder extends Emitter
+export class Recorder extends Emitter<RecorderEvents>
 {
-	/**
-	 * @ignore
-	 * @hideconstructor
-	 * private constructor
-	 */
+	params: RecorderParams;
+    filename: string;
+    recorder: SharedPointer.Proxy<Native.MP4RecorderFacadeShared>;
+    recording: boolean = false;
+    startTime?: Date;
+    tracks: Set<RecorderTrack> = new Set();
+    maxTrackId: number = 1;
+    refresher?: Refresher;
+
+	// native callbacks
+	private onstarted: (timestamp: number) => void;
+	public onclosed: (value: unknown) => void = () => {}
+
 	constructor(
-		/** @type {string} */ filename,
-		/** @type {RecorderParams | undefined} */ params = undefined)
+		filename: string,
+		params?: RecorderParams)
 	{
 		//Init emitter
 		super();
 
 		//Store params
-		this.params = Object.assign({},params);
+		this.params = { ...params } 
 		
 		//Check mp4 file name
 		if ((!filename || !filename.length) && !this.params.timeShift)
@@ -53,7 +60,7 @@ class Recorder extends Emitter
 		this.filename = filename;
 	
 		//Create native recorder
-		this.recorder = SharedPointer(new Native.MP4RecorderFacadeShared(this));
+		this.recorder = SharedPointer.SharedPointer(new Native.MP4RecorderFacadeShared(this));
 		
 		//Check if not doing a time shifted recording
 		if (!this.params.timeShift)
@@ -68,7 +75,7 @@ class Recorder extends Emitter
 			this.startTime = new Date();
 		} else {
 			//Set timeshift
-			this.recorder.SetTimeShiftDuration(parseInt(this.params.timeShift));
+			this.recorder.SetTimeShiftDuration(this.params.timeShift);
 		}
 			
 		//init track list
@@ -82,7 +89,7 @@ class Recorder extends Emitter
 			this.refresher = new Refresher(this.params.refresh);
 		
 		//Listener for player facade events
-		this.onstarted = (/** @type {number} */ timestamp) => {
+		this.onstarted = (timestamp: number) => {
 			this.emit("started",this,timestamp);
 		};
 	}
@@ -91,7 +98,7 @@ class Recorder extends Emitter
 	 * Get recording filename
 	 * @returns {String} 
 	 */
-	getFilename()
+	getFilename(): string
 	{
 		return this.filename;
 	}
@@ -100,7 +107,7 @@ class Recorder extends Emitter
 	 * Get recording filename
 	 * @returns {Date | undefined} 
 	 */
-	getStartTime()
+	getStartTime(): Date | undefined
 	{
 		return this.startTime;
 	}
@@ -109,7 +116,7 @@ class Recorder extends Emitter
 	 * Is the recording time shifted?
 	 * @returns {Boolean} 
 	 */
-	isTimeShifted()
+	isTimeShifted(): boolean
 	{
 		return !!this.params.timeShift;
 	}
@@ -118,7 +125,7 @@ class Recorder extends Emitter
 	 * Start recording time shiftt buffer. 
 	 * @param {String} filename - Override filename [Optional]
 	 */
-	flush(filename)
+	flush(filename: string): void
 	{
 		//Chcek not already recording
 		if (this.recording)
@@ -145,14 +152,15 @@ class Recorder extends Emitter
 	 * @param {{ multitrack?: boolean }} [options]
 	 * @returns {Array<RecorderTrack>} 
 	 */
-	record(incomingStreamOrTrack, options)
+	record(incomingStreamOrTrack: IncomingStream|IncomingStreamTrack, options?: { multitrack?: boolean }): Array<RecorderTrack>
 	{
-		const tracks = /** @type {RecorderTrack[]} */ ([]);
+		const tracks: RecorderTrack[] = [];
 
 		//Set defaults
-		options = Object.assign({
-			multitrack: true
-		}, options);
+		options = { 
+            multitrack: true, 
+            ...options 
+        };
 
 		//Get all tracks to be recorded
 		const incomingStreamTracks = incomingStreamOrTrack instanceof IncomingStream ? incomingStreamOrTrack.getTracks() : [incomingStreamOrTrack];
@@ -170,7 +178,7 @@ class Recorder extends Emitter
 			//Check if it has out of band h264 parameters
 			if (incomingStreamTrack.hasH264ParameterSets && incomingStreamTrack.hasH264ParameterSets())
 				//TODO: Support H264 parameter sets per track instead of per recorder
-				this.recorder.SetH264ParameterSets(incomingStreamTrack.getH264ParameterSets());
+				this.recorder.SetH264ParameterSets(incomingStreamTrack.getH264ParameterSets()!);
 			//If doing multitrack
 			if (options.multitrack)
 			{
@@ -212,9 +220,10 @@ class Recorder extends Emitter
 		}
 
 		//If we need to periodically refresh
-		if (this.refresher)
+		if (this.refresher) {
 			//Do the refresh on the stream periodically
 			this.refresher.add(incomingStreamOrTrack);
+		}
 		
 		//Return all the added tracks
 		return tracks;
@@ -225,19 +234,20 @@ class Recorder extends Emitter
 	 * This operation will not change the muted state of the stream this track belongs too.
 	 * @param {boolean} muting - if we want to mute or unmute
 	 */
-	mute(muting) 
+	mute(muting: boolean) 
 	{
 		//For each track
-		for (let track of this.tracks.values())
+		for (let track of this.tracks.values()) {
 			//Mute track
 			track.mute(muting);
+		}
 	}
 
 	/**
 	 * Stop recording and close file. NOTE: File will be flsuh async,
 	 * @returns {Promise<void>} -  TODO: return promise when flush is ended
 	 */
-	async stop()
+	async stop(): Promise<void>
 	{
 		//Don't call it twice
 		if (!this.recorder) return;

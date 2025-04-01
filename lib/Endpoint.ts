@@ -1,82 +1,72 @@
-const NetworkUtils			= require("./NetworkUtils");
-const Native				= require("./Native");
-const Emitter			= require("medooze-event-emitter");
-const Transport				= require("./Transport");
-const PeerConnectionServer		= require("./PeerConnectionServer");
-const SDPManager			= require("./SDPManager");
-const SDPManagerUnified			= require("./SDPManagerUnified");
-const SDPManagerPlanB			= require("./SDPManagerPlanB");
-const IncomingStream			= require("./IncomingStream");
-const IncomingStreamTrackMirrored	= require("./IncomingStreamTrackMirrored");
-const IncomingStreamTrack		= require("./IncomingStreamTrack");
-const OutgoingStream			= require("./OutgoingStream");
-const OutgoingStreamTrack		= require("./OutgoingStreamTrack");
-const ActiveSpeakerMultiplexer		= require("./ActiveSpeakerMultiplexer");
-	
-const SemanticSDP	= require("semantic-sdp");
-const {
-	SDPInfo,
-	MediaInfo,
-	CandidateInfo,
-	DTLSInfo,
-	ICEInfo,
-	StreamInfo,
-	TrackInfo,
-	Setup,
-} = require("semantic-sdp");
+import * as NetworkUtils from "./NetworkUtils";
+import * as Native from "./Native";
+import Emitter from "medooze-event-emitter";
+import {Transport} from "./Transport";
+import {PeerConnectionServer} from "./PeerConnectionServer";
+import {SDPManager} from "./SDPManager";
+import {SDPManagerUnified} from "./SDPManagerUnified";
+import {SDPManagerPlanB} from "./SDPManagerPlanB";
+import {IncomingStream} from "./IncomingStream";
+import {IncomingStreamTrackMirrored} from "./IncomingStreamTrackMirrored";
+import {IncomingStreamTrack} from "./IncomingStreamTrack";
+import {OutgoingStream} from "./OutgoingStream";
+import {OutgoingStreamTrack} from "./OutgoingStreamTrack";
+import {ActiveSpeakerMultiplexer} from "./ActiveSpeakerMultiplexer";
+import { CandidateInfo, CandidateInfoLike, Capabilities, DTLSInfo, DTLSInfoLike, ICEInfo, ICEInfoLike, SDPInfo, Setup, StreamInfoLike } from "semantic-sdp";
 
-const assertUnreachable = (/** @type {never} */ x) => { throw new Error('assertion failed') };
+const assertUnreachable = (x: never): never => { throw new Error('assertion failed') };
 
-//@ts-expect-error
-const parseInt = /** @type {(x: number) => number} */ (global.parseInt);
+/** Dictionary with transport properties */
+export interface CreateTransportOptions {
+	/** Disable ICE/STUN keep alives, required for server to server transports */
+    disableSTUNKeepAlive?: boolean;
+	/** Colon delimited list of SRTP protection profile names */
+    srtpProtectionProfiles?: string;
+	/** Override BWE reported by REMB */
+    overrideBWE?: boolean;
+	/** Disable REMB BWE calculation. */
+    disableREMB?: boolean;
+	/** Preffer setting local DTLS setup to 'active' if remote is 'actpass'. */
+    prefferDTLSSetupActive?: boolean;
+}
 
-/**
- * @typedef {Object} CreateTransportOptions Dictionary with transport properties
- * @property {boolean} [disableSTUNKeepAlive] Disable ICE/STUN keep alives, required for server to server transports
- * @property {String} [srtpProtectionProfiles] Colon delimited list of SRTP protection profile names
- * @property {boolean} [overrideBWE] Override BWE reported by REMB
- * @property {boolean} [disableREMB] Disable REMB BWE calculation.
- * @property {boolean} [prefferDTLSSetupActive] Preffer setting local DTLS setup to 'active' if remote is 'actpass'.
- */
+export interface PeerInfo {
+	/** ICE info, containing the username and password */
+    ice: ICEInfoLike;
+	/** DTLS info */
+    dtls: DTLSInfoLike;
+	/** ICE candidates list (for local info, it's not really used at all) */
+    candidates?: CandidateInfoLike[];
+}
 
-/**
- * @typedef {Object} PeerInfo
- * @property {SemanticSDP.ICEInfoLike} ice ICE info, containing the username and password
- * @property {SemanticSDP.DTLSInfoLike} dtls DTLS info
- * @property {SemanticSDP.CandidateInfoLike[]} [candidates] ICE candidates list (for local info, it's not really used at all)
- */
+export interface ParsedPeerInfo {
+    ice: ICEInfo;
+    dtls: DTLSInfo;
+    candidates: CandidateInfo[];
+}
 
-/**
- * @typedef {Object} ParsedPeerInfo
- * @property {SemanticSDP.ICEInfo} ice
- * @property {SemanticSDP.DTLSInfo} dtls
- * @property {SemanticSDP.CandidateInfo[]} candidates
- */
-
-/**
- * @typedef {Object} CreateOfferParameters
- * @property {boolean} [unified] - Generate unified plan like media ids
- * @property {Array<SemanticSDP.StreamInfoLike>} [streams] - Add the stream infos to the generated offer
- */
+export interface CreateOfferParameters {
+	/** Generate unified plan like media ids */
+    unified?: boolean;
+	/** Add the stream infos to the generated offer */
+    streams?: StreamInfoLike[];
+}
 
 
-/** @returns {ParsedPeerInfo} */
-function parsePeerInfo(/** @type {PeerInfo | SemanticSDP.SDPInfo} */ info)
+function parsePeerInfo(info: PeerInfo | SDPInfo): ParsedPeerInfo
 {
-	/** @type {PeerInfo} */
-	let peerInfo;
+	let peerInfo: PeerInfo;
 
 	//Support both plain js object and SDPInfo
-	if (info.constructor.name === "SDPInfo") {
-		const sdpInfo = /** @type {SemanticSDP.SDPInfo} */ (info);
+	if (info instanceof SDPInfo) {
 		//Convert
 		peerInfo = {
-			dtls		: sdpInfo.getDTLS(),
-			ice		: sdpInfo.getICE(),
-			candidates	: sdpInfo.getCandidates()
+			dtls		: info.getDTLS(),
+			ice		: info.getICE(),
+			candidates	: info.getCandidates()
 		};
 	} else {
-		peerInfo = /** @type {PeerInfo} */ (info);
+		peerInfo = info;
 	}
 
 	//Ensure that we have the correct params
@@ -92,36 +82,45 @@ function parsePeerInfo(/** @type {PeerInfo | SemanticSDP.SDPInfo} */ info)
 	};
 }
 
-/**
- * @typedef {Object} RawTxOptions
- * @property {string} interfaceName    (required) name of interface to send on
- * @property {boolean} [skipQdisc]    whether to skip the traffic shaping (qdisc) on the interface
- * @property {number} [sndBuf]    AF_PACKET socket send queue
- */
+export interface RawTxOptions {
+	/** (required) name of interface to send on */
+    interfaceName: string;
+	/** whether to skip the traffic shaping (qdisc) on the interface */
+    skipQdisc?: boolean;
+	/** AF_PACKET socket send queue */
+    sndBuf?: number;
+}
 
-/** @typedef {Native.RTPBundleTransport & { rawTxInterface?: number }} NativeBundle */
+export interface NativeBundle extends Native.RTPBundleTransport {
+    rawTxInterface?: number;
+}
 
-/**
- * @typedef {Object} EndpointEvents
- * @property {(self: Endpoint) => void} stopped
- */
+interface EndpointEvents {
+    stopped: (self: Endpoint) => void;
+}
 
 /**
  * An endpoint represent an UDP server socket.
  * The endpoint will process STUN requests in order to be able to associate the remote ip:port with the registered transport and forward any further data comming from that transport.
  * Being a server it is ICE-lite.
- * @extends {Emitter<EndpointEvents>}
  */
-class Endpoint extends Emitter
+export class Endpoint extends Emitter<EndpointEvents>
 {
-	/**
-	 * @ignore
-	 * @hideconstructor
-	 * private constructor
-	 */
-	constructor(
-		/** @type {string | string[]} */ ip,
-		packetPoolSize = 0)
+	ips: string[];
+    bundle: NativeBundle;
+    transports: Set<Transport>;
+    candidates: CandidateInfo[];
+    defaultSRTPProtectionProfiles: string;
+    fingerprint: string;
+    stopped: boolean;
+
+	mirrored: {
+        streams: WeakMap<IncomingStream, IncomingStream>;
+        tracks: WeakMap<IncomingStreamTrack, IncomingStreamTrackMirrored>;
+        mirrors: Set<IncomingStream | IncomingStreamTrackMirrored>;
+    };
+
+	constructor(ip: string | string[], packetPoolSize = 0)
 	{
 		//Init emitter
 		super();
@@ -129,18 +128,18 @@ class Endpoint extends Emitter
 		//Store ip address of the endpoint
 		this.ips = Array.isArray(ip) ? ip : [ip];
 		//Create native endpoint
-		/** @type {NativeBundle} */
 		this.bundle = new Native.RTPBundleTransport(packetPoolSize);
 		//Start it
 		if (!this.bundle.Init())
 			//Throw errror
 			throw new Error("Could not initialize bundle for endpoint");
 		//Store all transports
-		this.transports = /** @type {Set<Transport>} */ (new Set());
+		this.transports = new Set<Transport>();
 		//Create candidates 
-		this.candidates = /** @type {CandidateInfo[]} */ ([]);
+		this.candidates = [];
 		//Default
 		this.defaultSRTPProtectionProfiles = "";
+		this.stopped = false;
 		//Create candidates
 		for (let i=0; i<this.ips.length; i++) 
 		{
@@ -154,10 +153,10 @@ class Endpoint extends Emitter
 
 		//Mirrored streams and tracks
 		this.mirrored = {
-			streams : /** @type {WeakMap<IncomingStream, IncomingStream>} */ (new WeakMap()),
-			tracks	: /** @type {WeakMap<IncomingStreamTrack, IncomingStreamTrackMirrored>} */ (new WeakMap()),
-			mirrors : /** @type {Set<IncomingStream | IncomingStreamTrackMirrored>} */ (new Set()),
-		};
+            streams: new WeakMap<IncomingStream, IncomingStream>(),
+            tracks: new WeakMap<IncomingStreamTrack, IncomingStreamTrackMirrored>(),
+            mirrors: new Set<IncomingStream | IncomingStreamTrackMirrored>(),
+        };
 	}
 	
 	/**
@@ -165,17 +164,17 @@ class Endpoint extends Emitter
 	 * @param {Number}  cpu - CPU core or -1 to reset affinity.
 	 * @returns {boolean} true if operation was successful
 	 */
-	setAffinity(cpu)
+	setAffinity(cpu: number): boolean
 	{
 		//Set cpu affinity
-		return this.bundle.SetAffinity(parseInt(cpu));
+		return this.bundle.SetAffinity(cpu);
 	}
 
 	/** 
 	 * setDefaultSRTProtectionProfiles
 	 * @param {String} srtpProtectionProfiles - Colon delimited list of SRTP protection profile names
 	 */
-	 setDefaultSRTProtectionProfiles(srtpProtectionProfiles)
+	 setDefaultSRTProtectionProfiles(srtpProtectionProfiles: string): void
 	 {
 		this.defaultSRTPProtectionProfiles = srtpProtectionProfiles;
 	 }
@@ -185,7 +184,7 @@ class Endpoint extends Emitter
 	 *
 	 * @param {false | RawTxOptions} options Options for raw TX. Pass false to disable.
 	 */
-	async setRawTx(options)
+	async setRawTx(options: false | RawTxOptions): Promise<void>
 	{
 		// if false was passed, disable raw TX sending
 		if (options === false) {
@@ -212,7 +211,7 @@ class Endpoint extends Emitter
 	 * @param {String}  name - thread name to set
 	 * @returns {boolean} true if operation was successful
 	 */
-	setThreadName(name)
+	setThreadName(name: string): boolean
 	{
 		return this.bundle.SetThreadName(name);
 	}
@@ -223,17 +222,17 @@ class Endpoint extends Emitter
 	 * @param {Number}  priority - 0:Normal -19:RealTime
 	 * @returns {boolean} true if operation was successful
 	 */
-	setPriority(priority)
+	setPriority(priority: number): boolean
 	{
 		//Set cpu affinity
-		return this.bundle.SetPriority(parseInt(priority));
+		return this.bundle.SetPriority(priority);
 	}
 	
 	/**
 	 * Set ICE timeout for outgoing ICE binding requests
 	 * @param {Number}  timeout - Ammount of time in milliseconds between ICE binding requests 
 	 */
-	setIceTimeout(timeout)
+	setIceTimeout(timeout: number): void
 	{
 		//Set it
 		return this.bundle.SetIceTimeout(timeout);
@@ -242,7 +241,7 @@ class Endpoint extends Emitter
 	/**
 	 * Get port at which UDP socket is bound
 	 */
-	getLocalPort()
+	getLocalPort(): number
 	{
 		return this.bundle.GetLocalPort()
 	}
@@ -254,7 +253,11 @@ class Endpoint extends Emitter
 	 * @param {CreateTransportOptions} [options]
 	 * @returns {Transport}	New transport object
 	 */
-	createTransport(remoteInfo, localInfo, options)
+	createTransport(
+        remoteInfo: SDPInfo | PeerInfo, 
+        localInfo?: SDPInfo | PeerInfo, 
+        options?: CreateTransportOptions
+    ): Transport
 	{
 		//Check we have a transport already
 		if (!this.bundle)
@@ -297,7 +300,7 @@ class Endpoint extends Emitter
 	 * Get local ICE candidates for this endpoint. It will be shared by all the transport associated to this endpoint.
 	 * @returns {Array<CandidateInfo>}
 	 */
-	getLocalCandidates() 
+	getLocalCandidates(): CandidateInfo[] 
 	{
 		//Return local host candiadate as array
 		return this.candidates;
@@ -308,7 +311,7 @@ class Endpoint extends Emitter
 	 * Get local DTLS fingerprint for this endpoint. It will be shared by all the transport associated to this endpoint.
 	 * @returns {String}
 	 */
-	getDTLSFingerprint()
+	getDTLSFingerprint(): string
 	{
 		return this.fingerprint;
 	}
@@ -320,7 +323,7 @@ class Endpoint extends Emitter
 	 * @param {CreateOfferParameters} [params]
 	 * @returns {SDPInfo} - SDP offer
 	 */
-	createOffer(capabilities, params)
+	createOffer(capabilities?: Capabilities, params?: CreateOfferParameters): SDPInfo
 	{
 		//Create offer
 		return SDPInfo.create({
@@ -340,7 +343,7 @@ class Endpoint extends Emitter
 	 * @param {CreateTransportOptions} options
 	 * @returns {PeerConnectionServer}
 	 */
-	createPeerConnectionServer(tm,capabilities,options)
+	createPeerConnectionServer(tm: any,capabilities: Capabilities,options: CreateTransportOptions): PeerConnectionServer
 	{
 		//Create new one 
 		return new PeerConnectionServer(this,tm,capabilities,options);
@@ -351,7 +354,7 @@ class Endpoint extends Emitter
 	 * @param {OutgoingStream|OutgoingStreamTrack[]} streamOrTracks - Outgoing stream or outgoing stream track array to be multiplexed
 	 * @returns {ActiveSpeakerMultiplexer}
 	 */
-	createActiveSpeakerMultiplexer(streamOrTracks)
+	createActiveSpeakerMultiplexer(streamOrTracks: OutgoingStream | OutgoingStreamTrack[]): ActiveSpeakerMultiplexer
 	{
 		return new ActiveSpeakerMultiplexer(this.bundle.GetTimeService(),streamOrTracks);
 	}
@@ -362,10 +365,10 @@ class Endpoint extends Emitter
 	 * @param {IncomingStream} incomingStream - stream to mirror
 	 * @returns {IncomingStream} mirrored stream.
 	 */
-	mirrorIncomingStream(incomingStream)
+	mirrorIncomingStream(incomingStream: IncomingStream): IncomingStream
 	{
 		//Get mirrored track
-		let mirroredStream = /** @type {IncomingStream} */ (this.mirrored.streams.get(incomingStream));
+		let mirroredStream = (this.mirrored.streams.get(incomingStream));
 		
 		//If not mirrored yet
 		if (!mirroredStream)
@@ -383,7 +386,7 @@ class Endpoint extends Emitter
 				//Create mirror track
 				const mirroredStreamTrack = this.mirrorIncomingStreamTrack(incomingStreamTrack);
 				//Add to mirrored stream
-				mirroredStream.addTrack(/** @type {any} */ (mirroredStreamTrack));
+				mirroredStream.addTrack((mirroredStreamTrack as any));
 			}
 			
 			//Listen for new tacks
@@ -391,25 +394,25 @@ class Endpoint extends Emitter
 				//Create mirror track
 				const mirroredStreamTrack = this.mirrorIncomingStreamTrack(incomingStreamTrack);
 				//Add to mirrored stream
-				mirroredStream.addTrack(/** @type {any} */ (mirroredStreamTrack));
+				mirroredStream!.addTrack((mirroredStreamTrack as any));
 			});
 			
 			// Listen for track removal
 			incomingStream.on("trackremoved", (incomingStream, incomingStreamTrack) => {
-				mirroredStream.removeTrack(incomingStreamTrack.getId());
+				mirroredStream!.removeTrack(incomingStreamTrack.getId());
 			});
 			
 			// Listen for track removal
 			mirroredStream.on("trackremoved", (incomingStream, incomingStreamTrack) => {
 				this.mirrored.tracks.delete(incomingStreamTrack);
-				this.mirrored.mirrors.delete(/** @type {any} */ (incomingStreamTrack));
+				this.mirrored.mirrors.delete((incomingStreamTrack as any));
 			});
 			
 			
 			//Stop listener for original stream
 			const onstopped = ()=>{
 				//Stop mirror
-				mirroredStream.stop();
+				mirroredStream?.stop();
 			};
 			
 			//Listen for stop event
@@ -419,7 +422,7 @@ class Endpoint extends Emitter
 			mirroredStream.once("stopped",()=>{
 				//Remove references
 				this.mirrored.streams.delete(incomingStream);
-				this.mirrored.mirrors.delete(mirroredStream);
+				this.mirrored.mirrors.delete(mirroredStream!);
 				//Remove listener
 				incomingStream.off("stopped",onstopped);
 			});
@@ -434,7 +437,7 @@ class Endpoint extends Emitter
 	 * @param {IncomingStreamTrack} incomingStreamTrack - track to mirror
 	 * @returns {IncomingStreamTrackMirrored} mirrored track.
 	 */
-	mirrorIncomingStreamTrack(incomingStreamTrack)
+	mirrorIncomingStreamTrack(incomingStreamTrack: IncomingStreamTrack): IncomingStreamTrackMirrored
 	{
 		//Get mirrored track
 		let mirroredStreamTrack = /** @type {IncomingStreamTrackMirrored} */ (this.mirrored.tracks.get(incomingStreamTrack));
@@ -451,7 +454,7 @@ class Endpoint extends Emitter
 			//Stop listener for original track
 			const onstopped = ()=>{
 				//Stop mirror
-				mirroredStreamTrack.stop();
+				mirroredStreamTrack!.stop();
 			};
 			//Listen for stop event
 			incomingStreamTrack.once("stopped",onstopped);
@@ -460,7 +463,7 @@ class Endpoint extends Emitter
 			mirroredStreamTrack.once("stopped",()=>{
 				//Remove references
 				this.mirrored.tracks.delete(incomingStreamTrack);
-				this.mirrored.mirrors.delete(mirroredStreamTrack);
+				this.mirrored.mirrors.delete(mirroredStreamTrack!);
 				//Remove listener
 				incomingStreamTrack.off("stopped",onstopped);
 			});
@@ -476,7 +479,7 @@ class Endpoint extends Emitter
 	 * @param {SemanticSDP.Capabilities} capabilities - Capabilities objects
 	 * @returns {SDPManager}
 	 */
-	createSDPManager(sdpSemantics,capabilities)
+	createSDPManager(sdpSemantics: "unified-plan" | "plan-b",capabilities: Capabilities): SDPManager
 	{
 		if (sdpSemantics=="plan-b")
 			return new SDPManagerPlanB(this,capabilities);
@@ -520,5 +523,3 @@ class Endpoint extends Emitter
 		this.bundle = null;
 	}
 }
-
-module.exports = Endpoint;

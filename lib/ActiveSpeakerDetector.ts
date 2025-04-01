@@ -1,25 +1,27 @@
-const IncomingStreamTrack = require("./IncomingStreamTrack");
-const Native		= require("./Native");
-const SharedPointer	= require("./SharedPointer");
-const Emitter		= require("medooze-event-emitter");
+import {IncomingStreamTrack} from "./IncomingStreamTrack";
+import * as Native from "./Native";
+import * as SharedPointer from "./SharedPointer";
+import Emitter from "medooze-event-emitter";
 
-/**
- * @typedef {Object} ActiveSpeakerDetectorEvents
- * @property {(track: IncomingStreamTrack) => void} activespeakerchanged New active speaker detected event (`track` is the track that has been activated)
- * @property {() => void} stopped
- */
+interface ActiveSpeakerDetectorEvents {
+	/** New active speaker detected event (`track` is the track that has been activated) */
+    activespeakerchanged: (track: IncomingStreamTrack) => void;
+    stopped: () => void;
+}
 
 /**
  * ActiveSpeakerDetector accumulate received voice activity and fires an event when it changes
- * @extends {Emitter<ActiveSpeakerDetectorEvents>}
  */
-class ActiveSpeakerDetector extends Emitter
+export class ActiveSpeakerDetector extends Emitter<ActiveSpeakerDetectorEvents>
 {
-	/**
-	 * @ignore
-	 * @hideconstructor
-	 * private constructor
-	 */
+	detector: Native.ActiveSpeakerDetectorFacade;
+    maxId: number;
+    ids: WeakMap<IncomingStreamTrack, number>;
+	tracks: Map<number, IncomingStreamTrack>;
+
+	// native callback
+	private onactivespeakerchanged: (id: number) => void;
+
 	constructor()
 	{
 		//Init emitter
@@ -27,11 +29,11 @@ class ActiveSpeakerDetector extends Emitter
 		
 		//List of the tracks associated to the speakers
 		this.maxId  = 1;
-		this.ids    = /** @type {WeakMap<IncomingStreamTrack, number>} */ (new WeakMap());
-		this.tracks = /** @type {Map<number, IncomingStreamTrack>} */ (new Map());
+		this.ids    = new WeakMap();
+		this.tracks = new Map();
 		
 		//Listen for speaker changes		
-		this.onactivespeakerchanged = (/** @type {number} */ id) => {
+		this.onactivespeakerchanged = (id: number) => {
 			//Get track
 			const track = this.tracks.get(id);
 			//Prevent race condition
@@ -43,18 +45,20 @@ class ActiveSpeakerDetector extends Emitter
 		//Create native detector
 		this.detector = new Native.ActiveSpeakerDetectorFacade(this);
 		
-		//The listener for attached tracks end event
-		this.onTrackStopped = (/** @type {IncomingStreamTrack} */ track) => {
-			//Remove track
-			this.removeSpeaker(track);
-		};
+		this.onTrackStopped = this.onTrackStopped.bind(this)
+	}
+
+	/** The listener for attached tracks end event */
+	private onTrackStopped(track: IncomingStreamTrack) {
+		//Remove track
+		this.removeSpeaker(track);
 	}
 	
 	/**
 	 * Set minimum period between active speaker changes
 	 * @param {Number} minChangePeriod
 	 */
-	setMinChangePeriod(minChangePeriod)
+	setMinChangePeriod(minChangePeriod: number)
 	{
 		this.detector.SetMinChangePeriod(minChangePeriod);
 	}
@@ -63,7 +67,7 @@ class ActiveSpeakerDetector extends Emitter
 	 * Maximux activity score accumulated by an speaker
 	 * @param {Number} maxAcummulatedScore
 	 */
-	setMaxAccumulatedScore(maxAcummulatedScore)
+	setMaxAccumulatedScore(maxAcummulatedScore: number)
 	{
 		this.detector.SetMaxAccumulatedScore(maxAcummulatedScore);
 	}
@@ -72,7 +76,7 @@ class ActiveSpeakerDetector extends Emitter
 	 * Minimum db level to not be considered as muted
 	 * @param {Number} noiseGatingThreshold
 	 */
-	setNoiseGatingThreshold(noiseGatingThreshold)
+	setNoiseGatingThreshold(noiseGatingThreshold: number)
 	{
 		this.detector.SetNoiseGatingThreshold(noiseGatingThreshold);
 	}
@@ -81,7 +85,7 @@ class ActiveSpeakerDetector extends Emitter
 	 * Set minimum activation score to be electible as active speaker
 	 * @param {Number} minActivationScore
 	 */
-	setMinActivationScore(minActivationScore)
+	setMinActivationScore(minActivationScore: number)
 	{
 		this.detector.SetMinActivationScore(minActivationScore);
 	}
@@ -90,7 +94,7 @@ class ActiveSpeakerDetector extends Emitter
 	 * Add incoming track for speaker detection
 	 * @param {IncomingStreamTrack} track
 	 */
-	addSpeaker(track) 
+	addSpeaker(track: IncomingStreamTrack) 
 	{
 		//Ensure that we don't have this trak already
 		if (this.ids.has(track))
@@ -122,7 +126,7 @@ class ActiveSpeakerDetector extends Emitter
 	 * Remove track from speaker detection
 	 * @param {IncomingStreamTrack} track
 	 */
-	removeSpeaker(track) 
+	removeSpeaker(track: IncomingStreamTrack) 
 	{
 		//Get id
 		const id = this.ids.get(track);
@@ -158,15 +162,15 @@ class ActiveSpeakerDetector extends Emitter
 	/**
 	 * Stop this transponder, will dettach the OutgoingStreamTrack
 	 */
-	stop()
+	stop(): void
 	{
 		//Stop listening for events, as they might have been queued
 		this.onactivespeakerchanged = ()=>{};
 		//Stop listening on any track
-		for (const track of this.tracks.values())
+		for (const track of this.tracks.values()) {
 			//remove track
 			this.removeSpeaker (track);
-	
+		}
 		this.emit("stopped");
 
 		//Stop emitter
@@ -178,6 +182,3 @@ class ActiveSpeakerDetector extends Emitter
 	}
 	
 };
-
-
-module.exports = ActiveSpeakerDetector;

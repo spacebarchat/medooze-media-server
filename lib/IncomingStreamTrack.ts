@@ -1,153 +1,217 @@
-const Native		= require("./Native");
-const SharedPointer	= require("./SharedPointer");
-const Emitter		= require("medooze-event-emitter");
-const LayerInfo		= require("./LayerInfo");
-const SemanticSDP	= require("semantic-sdp");
-const {
-	TrackInfo,
-	TrackEncodingInfo,
-	SourceGroupInfo,
-} = require("semantic-sdp");
+import * as Native from "./Native";
+import * as SharedPointer from "./SharedPointer";
+import Emitter from "medooze-event-emitter";
+import * as LayerInfo from "./LayerInfo";
+import { 
+    TrackType, 
+    TrackInfo, 
+    TrackEncodingInfo, 
+    SourceGroupInfo 
+} from "semantic-sdp";
+import { SSRCs } from "./Transport";
 
-/**
- * @typedef {Object} LayerStats Information about each spatial/temporal layer (if present)
- * @property {boolean} [active]
- * @property {number} simulcastIdx
- * @property {number} spatialLayerId Spatial layer id
- * @property {number} temporalLayerId Temporatl layer id
- * @property {number} totalBytes total rtp received bytes for this layer
- * @property {number} numPackets number of rtp packets received for this layer
- * @property {number} bitrate average media bitrate received during last second for this layer
- * @property {number} totalBitrate average total bitrate received during last second for this layer
- * @property {number} [width] video width
- * @property {number} [height] video height 
- * @property {number} [targetBitrate] signaled target bitrate on the VideoLayersAllocation header
- * @property {number} [targetWidth] signaled target width on the VideoLayersAllocation header
- * @property {number} [targetHeight] signaled target height on the VideoLayersAllocation header
- * @property {number} [targetFps] signaled target fps on the VideoLayersAllocation header
- * @property {string} codec Name of the codec last in use
- */
+/** Information about each spatial/temporal layer (if present) */
+export interface LayerStats {
+    active?: boolean;
+    simulcastIdx: number;
+    spatialLayerId: number;
+    temporalLayerId: number;
+	/** total rtp received bytes for this layer */
+    totalBytes: number;
+	/** number of rtp packets received for this layer */
+    numPackets: number;
+	/** average media bitrate received during last second for this layer */
+    bitrate: number;
+	/** average total bitrate received during last second for this layer */
+    totalBitrate: number;
+	/** video width */
+    width?: number;
+	/** video height */
+    height?: number;
+	/** signaled target bitrate on the VideoLayersAllocation header */
+    targetBitrate?: number;
+	/** signaled target width on the VideoLayersAllocation header */
+    targetWidth?: number;
+	/** signaled target height on the VideoLayersAllocation header */
+    targetHeight?: number;
+	/** signaled target fps on the VideoLayersAllocation header */
+    targetFps?: number;
+	/** Name of the codec last in use */
+    codec: string;
+}
 
-/**
- * @typedef {Object} MediaStats stats for each media stream
- * @property {number} lostPackets total lost packets
- * @property {number} lostPacketsDelta total lost/out of order packets during last second
- * @property {number} [lostPacketsMaxGap] max total consecutive packets lost during last second
- * @property {number} [lostPacketsGapCount] number of packet loss bursts during last second
- * @property {number} [dropPackets] droppted packets by media server
- * @property {number} numFrames number of frames received
- * @property {number} numFramesDelta number of frames received during last second
- * @property {number} numPackets number of rtp packets received
- * @property {number} numPacketsDelta number of rtp packets received during last second
- * @property {number} [numRTCPPackets] number of rtcp packsets received
- * @property {number} totalBytes total rtp received bytes
- * @property {number} [totalRTCPBytes] total rtp received bytes
- * @property {number} [totalPLIs] total PLIs sent
- * @property {number} [totalNACKs] total NACk packets sent
- * @property {number} bitrate average media bitrate received during last second for this layer
- * @property {number} totalBitrate average total bitrate received during last second for this layer
- * @property {number} [skew] difference between NTP timestamp and RTP timestamps at sender (from RTCP SR)
- * @property {number} [drift] ratio between RTP timestamps and the NTP timestamp and  at sender (from RTCP SR)
- * @property {number} [clockrate] RTP clockrate
- * @property {number} [frameDelay] Average frame delay during the last second
- * @property {number} [frameDelayMax] Max frame delay during the last second
- * @property {number} [frameCaptureDelay] Average bewtween local reception time and sender capture one (Absolute capture time must be negotiated)
- * @property {number} [frameCaptureDelayMax] Max bewtween local reception time and sender capture one (Absolute capture time must be negotiated)
- * @property {number} [width] video width
- * @property {number} [height] video height
- * @property {number} [targetBitrate] signaled target bitrate on the VideoLayersAllocation header
- * @property {number} [targetWidth] signaled target width on the VideoLayersAllocation header
- * @property {number} [targetHeight] signaled target height on the VideoLayersAllocation header
- * @property {number} [targetFps] signaled target fps on the VideoLayersAllocation header
- * @property {LayerStats[]} layers Information about each spatial/temporal layer (if present).
- * @property {LayerStats[]} [individual] Information about each individual layer
- */
+/** Stats for each media stream */
+export interface IncomingMediaStats {
+	/** total lost packets */
+    lostPackets: number;
+	/** total lost/out of order packets during last second */
+    lostPacketsDelta: number;
+	/** max total consecutive packets lost during last second */
+    lostPacketsMaxGap?: number;
+	/** number of packet loss bursts during last second */
+    lostPacketsGapCount?: number;
+	/** droppted packets by media server */
+    dropPackets?: number;
+	/** number of frames received */
+    numFrames: number;
+	/** number of frames received during last second */
+    numFramesDelta: number;
+	/** number of rtp packets received */
+    numPackets: number;
+	/** number of rtp packets received during last second */
+    numPacketsDelta: number;
+	/** number of rtcp packsets received */
+    numRTCPPackets?: number;
+	/** total rtp received bytes */
+    totalBytes: number;
+	/** total rtp received bytes */
+    totalRTCPBytes?: number;
+	/** total PLIs sent */
+    totalPLIs?: number;
+	/** total NACk packets sent */
+    totalNACKs?: number;
+	/** average media bitrate received during last second for this layer */
+    bitrate: number;
+	/** average total bitrate received during last second for this layer */
+    totalBitrate: number;
+	/** difference between NTP timestamp and RTP timestamps at sender (from RTCP SR) */
+    skew?: number;
+	/** ratio between RTP timestamps and the NTP timestamp and  at sender (from RTCP SR) */
+    drift?: number;
+	/** RTP clockrate */
+    clockrate?: number;
+	/** Average frame delay during the last second */
+    frameDelay?: number;
+	/** Max frame delay during the last second */
+    frameDelayMax?: number;
+	/** Average bewtween local reception time and sender capture one (Absolute capture time must be negotiated) */
+    frameCaptureDelay?: number;
+	/** Max bewtween local reception time and sender capture one (Absolute capture time must be negotiated) */
+    frameCaptureDelayMax?: number;
+	/** video width */
+    width?: number;
+	/** video height */
+    height?: number;
+	/** signaled target bitrate on the VideoLayersAllocation header */
+    targetBitrate?: number;
+	/** signaled target width on the VideoLayersAllocation header */
+    targetWidth?: number;
+	/** signaled target height on the VideoLayersAllocation header */
+    targetHeight?: number;
+	/** signaled target fps on the VideoLayersAllocation header */
+    targetFps?: number;
+	/** Information about each spatial/temporal layer (if present). */
+    layers: LayerStats[];
+	/** Information about each individual layer */
+    individual?: LayerStats[];
+}
 
-/**
- * @typedef PacketWaitTime packet waiting times in rtp buffer before delivering them
- * @property {number} min
- * @property {number} max
- * @property {number} avg
- */
+/** Packet waiting times in RTP buffer before delivering them */
+export interface PacketWaitTime {
+    min: number;
+    max: number;
+    avg: number;
+}
 
-/**
- * @typedef {Object} EncodingStats stats for each encoding (media and rtx sources (if used))
- *
- * @property {number} timestamp When this stats was generated (in order to save workload, stats are cached for 200ms)
- * @property {PacketWaitTime} waitTime 
- * @property {MediaStats} media Stats for the media stream
- * @property {MediaStats} rtx Stats for the rtx retransmission stream
- * 
- * @property {number} rtt Round Trip Time in ms
- * @property {number} bitrate Bitrate for media stream only in bps
- * @property {number} remb Estimated available bitrate for receiving (only available if not using transport wide cc)
- * @property {number} simulcastIdx Simulcast layer index based on bitrate received (-1 if it is inactive).
- * @property {number} [lostPacketsRatio] Lost packets ratio
- * @property {number} [width] video width
- * @property {number} [height] video height
- * @property {number} [targetBitrate] signaled target bitrate on the VideoLayersAllocation header
- * @property {number} [targetWidth] signaled target width on the VideoLayersAllocation header
- * @property {number} [targetHeight] signaled target height on the VideoLayersAllocation header
- * @property {number} [targetFps] signaled target fps on the VideoLayersAllocation header
- * @property {string} codec Name of the codec last in use
- *
- * Info accumulated for `media` and `rtx` streams:
- *
- * @property {number} numFrames
- * @property {number} numFramesDelta
- * @property {number} numPackets
- * @property {number} numPacketsDelta
- * @property {number} lostPackets
- * @property {number} lostPacketsDelta
- * 
- * @property {number} total Accumulated bitrate for media and rtx streams in bps (Deprecated)
- * @property {number} totalBitrate average total bitrate received during last second for this layer
- * @property {number} totalBytes total rtp received bytes for this layer
- */
+/** Stats for each encoding (media and rtx sources) */
+export interface EncodingStats {
+	/** When this stats was generated (in order to save workload, stats are cached for 200ms) */
+    timestamp: number;
+	/** Packet waiting times in RTP buffer before delivering them */
+    waitTime: PacketWaitTime;
+	/** Stats for the media stream */
+    media: IncomingMediaStats;
+	/** Stats for the rtx retransmission stream */
+    rtx: IncomingMediaStats;
+	/** Round Trip Time in ms */
+    rtt: number;
+	/** Bitrate for media stream only in bps */
+    bitrate: number;
+	/** Accumulated bitrate for media and rtx streams in bps
+	 * @deprecated
+	*/
+    total: number;
+	/** average total bitrate received during last second for this layer */
+    totalBitrate: number;
+	/** total rtp received bytes for this layer */
+    totalBytes: number;
+    lostPackets: number;
+    lostPacketsDelta: number;
+    numFrames: number;
+    numFramesDelta: number;
+    numPackets: number;
+    numPacketsDelta: number;
+	/** Estimated available bitrate for receiving (only available if not using transport wide cc) */
+    remb: number;
+	/** Simulcast layer index based on bitrate received (-1 if it is inactive). */
+    simulcastIdx: number;
+	/** Lost packets ratio */
+    lostPacketsRatio?: number;
+	/** video width */
+    width?: number;
+	/** video height */
+    height?: number;
+	/** signaled target bitrate on the VideoLayersAllocation header */
+    targetBitrate?: number;
+	/** signaled target width on the VideoLayersAllocation header */
+    targetWidth?: number;
+	/** signaled target height on the VideoLayersAllocation header */
+    targetHeight?: number;
+	/** signaled target fps on the VideoLayersAllocation header */
+    targetFps?: number;
+	/** Name of the codec last in use */
+    codec: string;
+}
 
-/** @typedef {{ [encodingId: string]: EncodingStats }} TrackStats providing the info for each source */
+/** Track stats providing info for each source */
+export type IncomingTrackStats = { [encodingId: string]: EncodingStats };
 
-/**
- * @typedef {Object} Encoding
- * @property {string} id
- * @property {SharedPointer.Proxy<Native.RTPIncomingSourceGroupShared>} source
- * @property {SharedPointer.Proxy<Native.RTPReceiverShared>} receiver
- * @property {SharedPointer.Proxy<Native.RTPIncomingMediaStreamDepacketizerShared>} depacketizer
- */
+export interface Encoding {
+    id: string;
+    source: SharedPointer.Proxy<Native.RTPIncomingSourceGroupShared>;
+    receiver: SharedPointer.Proxy<Native.RTPReceiverShared>;
+    depacketizer: SharedPointer.Proxy<Native.RTPIncomingMediaStreamDepacketizerShared>;
+}
 
-/**
- * @typedef {Object} ActiveEncodingInfo
- * @property {string} id
- * @property {number} simulcastIdx
- * @property {number} bitrate
- * @property {number} totalBitrate average bitrate (media + overhead) received during last second in bps  
- * @property {number} totalBytes total rtp received bytes for this layer
- * @property {number} numPackets number of rtp packets received for this layer
- * @property {LayerStats[]} layers
- * @property {number} [width]
- * @property {number} [height]
- * @property {number} [targetBitrate] signaled target bitrate on the VideoLayersAllocation header
- * @property {number} [targetWidth] signaled target width on the VideoLayersAllocation header
- * @property {number} [targetHeight] signaled target height on the VideoLayersAllocation header
- * @property {number} [targetFps] signaled target fps on the VideoLayersAllocation header
- * @property {string} codec Name of the codec last in use
- */
+export interface ActiveEncodingInfo {
+    id: string;
+    simulcastIdx: number;
+    bitrate: number;
+	/** average bitrate (media + overhead) received during last second in bps */
+    totalBitrate: number;
+	/** total rtp received bytes for this layer */
+    totalBytes: number;
+	/** number of rtp packets received for this layer */
+    numPackets: number;
+    layers: LayerStats[];
+    width?: number;
+    height?: number;
+	/** signaled target bitrate on the VideoLayersAllocation header */
+    targetBitrate?: number;
+	/** signaled target width on the VideoLayersAllocation header */
+    targetWidth?: number;
+	/** signaled target height on the VideoLayersAllocation header */
+    targetHeight?: number;
+	/** signaled target fps on the VideoLayersAllocation header */
+    targetFps?: number;
+	/** Name of the codec last in use */
+    codec: string;
+}
 
-/**
- * @typedef {Object} ActiveLayersInfo Active layers object containing an array of active and inactive encodings and an array of all available layer info
- * @property {ActiveEncodingInfo[]} active
- * @property {Array<LayerStats & { encodingId: string }>} layers
- * @property {{ id: string }[]} inactive
- */
+/** Active layers object containing an array of active and inactive encodings and an array of all available layer info */
+export interface ActiveLayersInfo {
+    active: ActiveEncodingInfo[];
+    layers: (LayerStats & { encodingId: string })[];
+    inactive: { id: string }[];
+}
 
-/** @returns {EncodingStats} */
-function getEncodingStats(/** @type {Encoding} */ encoding)
+function getEncodingStats(encoding: Encoding): EncodingStats
 {
 	//Get stats from sources
 	const mediaStats = getStatsFromIncomingSource(encoding.source.media);
 	const rtxStats = getStatsFromIncomingSource(encoding.source.rtx);
-	/** @type {EncodingStats} */
-	const encodingStats = {
+
+	const encodingStats: EncodingStats = {
 		rtt	 : encoding.source.rtt,
 		waitTime : {
 			min     : encoding.source.minWaitedTime,
@@ -173,6 +237,7 @@ function getEncodingStats(/** @type {Encoding} */ encoding)
 		simulcastIdx	: -1,
 		codec		: encoding.source.codec,
 	};
+
 	//Calculate packet lost ration from total num packets
 	encodingStats.lostPacketsRatio = encodingStats.numPackets? encodingStats.lostPackets / encodingStats.numPackets : 0;
 	//If we have dimenstions
@@ -196,11 +261,9 @@ function getEncodingStats(/** @type {Encoding} */ encoding)
 	return encodingStats;
 }
 
-/** @returns {MediaStats} */
-function getStatsFromIncomingSource(/** @type {Native.RTPIncomingSource} */ source) 
+function getStatsFromIncomingSource(source: Native.RTPIncomingSource): IncomingMediaStats 
 {
-	/** @type {MediaStats} */
-	const stats = {
+	const stats: IncomingMediaStats = {
 		numFrames		: source.numFrames,
 		numFramesDelta		: source.numFramesDelta,
 		lostPackets		: source.lostPackets,
@@ -248,7 +311,7 @@ function getStatsFromIncomingSource(/** @type {Native.RTPIncomingSource} */ sour
 	const layers = source.layers();
 
 	//Not aggregated stats
-	const individual = stats.individual = /** @type {LayerStats[]} */ ([]);
+	const individual: LayerStats[] = stats.individual = ([]);
 
 	//Check if it has layer stats
 	for (let i=0; i<layers.size(); ++i)
@@ -256,8 +319,7 @@ function getStatsFromIncomingSource(/** @type {Native.RTPIncomingSource} */ sour
 		//Get layer
 		const layer = layers.get(i);
 		
-		/** @type {LayerStats} */
-		const curated = {
+		const curated: LayerStats = {
 			spatialLayerId  : layer.spatialLayerId,
 			temporalLayerId : layer.temporalLayerId,
 			totalBytes	: layer.totalBytes,
@@ -294,9 +356,8 @@ function getStatsFromIncomingSource(/** @type {Native.RTPIncomingSource} */ sour
 		//If the layers are not aggreagated
 		if (!source.aggregatedLayers)
 		{
-			//Create empty stat
-			/** @type {LayerStats} */
-			const aggregated = {
+			//Create empty stats
+			const aggregated: LayerStats = {
 				spatialLayerId	: layer.spatialLayerId,
 				temporalLayerId	: layer.temporalLayerId,
 				totalBytes	: 0,
@@ -349,21 +410,27 @@ function getStatsFromIncomingSource(/** @type {Native.RTPIncomingSource} */ sour
 	return stats;
 }
 
-function sortByBitrate(/** @type {EncodingStats|LayerStats|ActiveEncodingInfo} */ a, /** @type {EncodingStats|LayerStats|ActiveEncodingInfo} */ b)
+function sortByBitrate(
+    a: EncodingStats | LayerStats | ActiveEncodingInfo, 
+    b: EncodingStats | LayerStats | ActiveEncodingInfo
+): number
 {
 	return a.targetBitrate && b.targetBitrate 
 		? a.targetBitrate - b.targetBitrate 
 		: a.bitrate - b.bitrate;
 }
 
-function sortByBitrateReverse(/** @type {EncodingStats|LayerStats|ActiveEncodingInfo} */ a, /** @type {EncodingStats|LayerStats|ActiveEncodingInfo} */ b)
+function sortByBitrateReverse(
+    a: EncodingStats | LayerStats | ActiveEncodingInfo, 
+    b: EncodingStats | LayerStats | ActiveEncodingInfo
+): number
 {
 	return a.targetBitrate && b.targetBitrate 
 		? b.targetBitrate - a.targetBitrate 
 		: b.bitrate - a.bitrate;
 }
 
-function updateStatsSimulcastIndexAndCodec(/** @type {TrackStats} */ stats)
+function updateStatsSimulcastIndexAndCodec(stats: IncomingTrackStats): void
 {
 	//Set simulcast index
 	let simulcastIdx = 0;
@@ -390,12 +457,11 @@ function updateStatsSimulcastIndexAndCodec(/** @type {TrackStats} */ stats)
 }
 
 
-/** @returns {ActiveLayersInfo} */
-function getActiveLayersFromStats(/** @type {TrackStats} */ stats)
+function getActiveLayersFromStats(stats: IncomingTrackStats): ActiveLayersInfo
 {
-	const active	= /** @type {ActiveLayersInfo['active']} */ ([]);
-	const inactive  = /** @type {ActiveLayersInfo['inactive']} */ ([]);
-	const all	= /** @type {ActiveLayersInfo['layers']} */ ([]);
+	const active: ActiveLayersInfo['active'] =  ([]);
+	const inactive: ActiveLayersInfo['inactive']  =  ([]);
+	const all: ActiveLayersInfo['layers'] =  ([]);
 
 	//For all encodings
 	for (const id in stats)
@@ -412,8 +478,7 @@ function getActiveLayersFromStats(/** @type {TrackStats} */ stats)
 		}
 			
 		//Append to encodings
-		/** @type {ActiveEncodingInfo} */
-		const encoding = {
+		const encoding: ActiveEncodingInfo = {
 			id		: id,
 			simulcastIdx	: stats[id].simulcastIdx,
 			totalBytes	: stats[id].totalBytes,
@@ -449,8 +514,7 @@ function getActiveLayersFromStats(/** @type {TrackStats} */ stats)
 		for (const layer of layers)
 		{
 
-			/** @type {LayerStats} */
-			const layerStats = {
+			const layerStats: LayerStats = {
 				simulcastIdx	: layer.simulcastIdx,
 				spatialLayerId	: layer.spatialLayerId,
 				temporalLayerId	: layer.temporalLayerId,
@@ -509,39 +573,47 @@ function getActiveLayersFromStats(/** @type {TrackStats} */ stats)
 	};
 }
 
-/**
- * @template Self
- * @template Encoding
- * @typedef {Object} IncomingStreamTrackEvents
- * @property {(self: Self, encoding: Encoding) => void} encoding New encoding (right now, this is only used by {@link IncomingStreamTrackMirrored} and {@link IncomingStreamTrackSimulcastAdapter})
- * @property {(self: Self, encoding: Encoding) => void} encodingremoved The encoding has been removed
- * @property {(self: Self) => void} attached
- * @property {(self: Self) => void} detached
- * @property {(muted: boolean) => void} muted
- * @property {(self: Self, stats?: TrackStats) => void} stopped
- */
+export type NativeSourceMap = { [id: string]: SharedPointer.Proxy<Native.RTPIncomingSourceGroupShared> };
 
-/** @typedef {{ [id: string]: SharedPointer.Proxy<Native.RTPIncomingSourceGroupShared> }} NativeSourceMap */
+/** IncomingStreamTrack Events Type */
+export interface IncomingStreamTrackEvents<Self, Encoding> {
+	/** New encoding (right now, this is only used by {@link IncomingStreamTrackMirrored} and {@link IncomingStreamTrackSimulcastAdapter}) */
+    encoding: (self: Self, encoding: Encoding) => void;
+	/** The encoding has been removed */
+    encodingremoved: (self: Self, encoding: Encoding) => void;
+    attached: (self: Self) => void;
+    detached: (self: Self) => void;
+    muted: (muted: boolean) => void;
+    stopped: (self: Self, stats?: IncomingTrackStats) => void;
+}
 
 /**
  * Audio or Video track of a remote media stream
- * @extends {Emitter<IncomingStreamTrackEvents<IncomingStreamTrack, Encoding>>}
  */
-class IncomingStreamTrack extends Emitter
+export class IncomingStreamTrack extends Emitter<IncomingStreamTrackEvents<IncomingStreamTrack, Encoding>>
 {
-	/**
-	 * @ignore
-	 * @hideconstructor
-	 * private constructor
-	 */
+	readonly id: string;
+    readonly mediaId: string;
+    readonly media: TrackType;
+    readonly receiver: SharedPointer.Proxy<Native.RTPReceiverShared>;
+    muted: boolean = false;
+    counter: number = 0;
+    stats: IncomingTrackStats = {};
+    trackInfo: TrackInfo;
+    encodings: Map<string, Encoding>;
+    simulcastDepacketizer?: SharedPointer.Proxy<Native.SimulcastMediaFrameListenerShared>;
+    depacketizer: SharedPointer.Proxy<Native.SimulcastMediaFrameListenerShared | Native.RTPIncomingMediaStreamDepacketizerShared>;
+    private stopped?: boolean;
+    private h264ParameterSets?: string;
+
 	constructor(
-		/** @type {SemanticSDP.TrackType} */ media,
-		/** @type {string} */ id,
-		/** @type {string} */ mediaId,
-		/** @type {Native.TimeService} */ timeService,
-		/** @type {SharedPointer.Proxy<Native.RTPReceiverShared>} */ receiver,
-		/** @type {NativeSourceMap} */ sources)
-	{
+        media: TrackType,
+        id: string,
+        mediaId: string,
+        timeService: Native.TimeService,
+        receiver: SharedPointer.Proxy<Native.RTPReceiverShared>,
+        sources: NativeSourceMap
+    ) {
 		//Init emitter
 		super();
 
@@ -556,13 +628,13 @@ class IncomingStreamTrack extends Emitter
 		this.counter	= 0;
 
 		//Cached stats
-		this.stats = /** @type {TrackStats} */ ({});
+		this.stats =  {};
 	
 		//Create info
 		this.trackInfo = new TrackInfo(media, id);
 		
 		//Create source map
-		this.encodings = /** @type {Map<string, Encoding>} */ (new Map());
+		this.encodings = new Map<string, Encoding>();
 
 		//Get number of encodings
 		const num = Object.keys(sources).length;
@@ -571,36 +643,33 @@ class IncomingStreamTrack extends Emitter
 		if (num > 1 && timeService)
 		{
 			//Create a simulcast frame listerner for selecting best frame from all sources
-			/** @type {SharedPointer.Proxy<Native.SimulcastMediaFrameListenerShared>} */
-			this.simulcastDepacketizer =  SharedPointer(new Native.SimulcastMediaFrameListenerShared(timeService, 1, num));
+			this.simulcastDepacketizer =  SharedPointer.SharedPointer(new Native.SimulcastMediaFrameListenerShared(timeService, 1, num));
 			//Use it as default
-			/** @type {SharedPointer.Proxy<Native.SimulcastMediaFrameListenerShared | Native.RTPIncomingMediaStreamDepacketizerShared>} */
 			this.depacketizer = this.simulcastDepacketizer;
 		}
 		
 		//For each source
-		for (let [id, source] of Object.entries(sources))
+		for (let [id, source] of Object.entries(sources)) {
 			//Add source
 			this.addIncomingSource(id, source);
+		}
 
 		//If there is no simulcast depacketizer used
-		if (!this.depacketizer)
+		// @ts-ignore
+		if (!this.depacketizer) {
 			//This is the single depaquetizer, so reause it
-			/** @type {SharedPointer.Proxy<Native.SimulcastMediaFrameListenerShared | Native.RTPIncomingMediaStreamDepacketizerShared>} */
 			this.depacketizer = this.getDefaultEncoding().depacketizer;
+		}
 	}
 
-	addIncomingSource(
-		/** @type string*/ id,
-		/** @type SharedPointer.Proxy<Native.RTPIncomingSourceGroupShared> */ source,
-	)
+	addIncomingSource(id: string, source: SharedPointer.Proxy<Native.RTPIncomingSourceGroupShared>): void
 	{
 		//The encoding
 		const encoding = {
 			id		: id,
 			source		: source,
 			receiver	: this.receiver,
-			depacketizer	: SharedPointer(new Native.RTPIncomingMediaStreamDepacketizerShared(source.toRTPIncomingMediaStream()))
+			depacketizer	: SharedPointer.SharedPointer(new Native.RTPIncomingMediaStreamDepacketizerShared(source.toRTPIncomingMediaStream()))
 		};
 			
 		//Push new encoding
@@ -640,9 +709,9 @@ class IncomingStreamTrack extends Emitter
 	
 	/**
 	 * Get stats for all encodings 
-	 * @returns {Promise<TrackStats>}
+	 * @returns {Promise<IncomingTrackStats>}
 	 */
-	async getStatsAsync()
+	async getStatsAsync(): Promise<IncomingTrackStats>
 	{
 		//Get current timestamp
 		const ts = Date.now();
@@ -672,9 +741,9 @@ class IncomingStreamTrack extends Emitter
 
 	/**
 	 * Get stats for all encodings 
-	 * @returns {TrackStats}
+	 * @returns {IncomingTrackStats}
 	 */
-	getStats()
+	getStats(): IncomingTrackStats
 	{
 		//Get current timestamp
 		const ts = Date.now();
@@ -704,7 +773,7 @@ class IncomingStreamTrack extends Emitter
 	 * Get active encodings and layers ordered by bitrate
 	 * @returns {ActiveLayersInfo} Active layers object containing an array of active and inactive encodings and an array of all available layer info
 	 */
-	getActiveLayers()
+	getActiveLayers(): ActiveLayersInfo
 	{
 		//Get track stats
 		const stats = this.getStats();
@@ -717,7 +786,7 @@ class IncomingStreamTrack extends Emitter
 	 * Get active encodings and layers ordered by bitrate
 	 * @returns {Promise<ActiveLayersInfo>} Active layers object containing an array of active and inactive encodings and an array of all available layer info
 	 */
-	async getActiveLayersAsync()
+	async getActiveLayersAsync(): Promise<ActiveLayersInfo>
 	{
 		//Get track stats
 		const stats = await this.getStatsAsync();
@@ -729,7 +798,7 @@ class IncomingStreamTrack extends Emitter
 	/**
 	* Get track id as signaled on the SDP
 	*/
-	getId()
+	getId(): string
 	{
 		return this.id;
 	}
@@ -737,7 +806,7 @@ class IncomingStreamTrack extends Emitter
 	/**
 	* Get track media id
 	*/
-	getMediaId()
+	getMediaId(): string
 	{
 		return this.mediaId;
 	}
@@ -745,7 +814,7 @@ class IncomingStreamTrack extends Emitter
 	/**
 	 * Get track info object
 	 */
-	getTrackInfo()
+	getTrackInfo(): TrackInfo
 	{
 		return this.trackInfo;
 	}
@@ -753,9 +822,9 @@ class IncomingStreamTrack extends Emitter
 	 * Return ssrcs associated to this track
 	 * @returns {{ [encodingId: string]: { media: number, rtx: number } }}
 	 */
-	getSSRCs()
+	getSSRCs(): { [encodingId: string]: SSRCs }
 	{
-		const ssrcs = /** @type {{ [encodingId: string]: { media: number, rtx: number } }} */ ({});
+		const ssrcs: { [encodingId: string]: { media: number, rtx: number } }  = {};
 		
 		//For each source
 		for (let encoding of this.encodings.values())
@@ -770,9 +839,9 @@ class IncomingStreamTrack extends Emitter
 	
 	/**
 	* Get track media type
-	* @returns {SemanticSDP.TrackType}
+	* @returns {TrackType}
 	*/
-	getMedia()
+	getMedia(): TrackType
 	{
 		return this.media;
 	}
@@ -782,7 +851,7 @@ class IncomingStreamTrack extends Emitter
 	 * Internal use, you'd beter know what you are doing before calling this method
 	 * @returns {Array<Encoding>} - encodings 
 	 **/
-	getEncodings()
+	getEncodings(): Encoding[]
 	{
 		return Array.from(this.encodings.values());
 	}
@@ -793,7 +862,7 @@ class IncomingStreamTrack extends Emitter
 	 * @param {String} encodingId	- encoding Id,
 	 * @returns {Encoding | undefined}
 	 **/
-	getEncoding(encodingId)
+	getEncoding(encodingId: string): Encoding | undefined
 	{
 		return this.encodings.get(encodingId);
 	}
@@ -803,7 +872,7 @@ class IncomingStreamTrack extends Emitter
 	 * Internal use, you'd beter know what you are doing before calling this method
 	 * @returns {Encoding}
 	 **/
-	getDefaultEncoding()
+	getDefaultEncoding(): Encoding
 	{
 		return [...this.encodings.values()][0];
 	}
@@ -812,43 +881,46 @@ class IncomingStreamTrack extends Emitter
 	 * Signal that this track has been attached.
 	 * Internal use, you'd beter know what you are doing before calling this method
 	 */
-	attached() 
+	attached(): void
 	{
 		//Increase attach counter
 		this.counter++;
 		
 		//If it is the first
-		if (this.counter===1)
+		if (this.counter===1) {
 			this.emit("attached",this);
+		}
 	}
 	
 	/** 
 	 * Request an intra refres on all sources
 	 */
-	refresh()
+	refresh(): void
 	{
 		//For each source
-		for (let encoding of this.encodings.values())
+		for (let encoding of this.encodings.values()) {
 			//Request an iframe on main ssrc
 			this.receiver.SendPLI(encoding.source.media.ssrc);
+		}
 	}
 
 	/** 
 	 * Reset state of incoming sources
 	 */
-	reset()
+	reset(): void
 	{
 		//For each source
-		for (let encoding of this.encodings.values())
+		for (let encoding of this.encodings.values()) {
 			//Reset state
 			this.receiver.Reset(encoding.source.media.ssrc);
+		}
 	}
 
 	/**
 	 * Check if the track is muted or not
 	 * @returns {boolean} muted
 	 */
-	isMuted()
+	isMuted(): boolean
 	{
 		return this.muted;
 	}
@@ -857,7 +929,7 @@ class IncomingStreamTrack extends Emitter
 	 * Mute/Unmute track
 	 * @param {boolean} muting - if we want to mute or unmute
 	 */
-	mute(muting) 
+	mute(muting: boolean): void 
 	{
 		//For each source
 		for (let encoding of this.encodings.values())
@@ -865,9 +937,10 @@ class IncomingStreamTrack extends Emitter
 			//Mute encoding
 			encoding.source.Mute(muting);
 			//If unmuting
-			if (!muting)
+			if (!muting) {
 				//Request an iframe on main ssrc
 				this.receiver.SendPLI(encoding.source.media.ssrc);
+			}
 		}
 		
 		//If we are different
@@ -882,7 +955,7 @@ class IncomingStreamTrack extends Emitter
 	/**
 	 * Return if the track is attached or not
 	 */
-	isAttached()
+	isAttached(): boolean
 	{
 		return this.counter>0;
 	}
@@ -892,7 +965,7 @@ class IncomingStreamTrack extends Emitter
 	 * Signal that this track has been detached.
 	 * Internal use, you'd beter know what you are doing before calling this method
 	 */
-	detached()
+	detached(): void
 	{
 		//Decrease attach counter
 		this.counter--;
@@ -906,7 +979,7 @@ class IncomingStreamTrack extends Emitter
 	 * Store out of band h264 properties for this track
 	 * @param {String} sprop Base64 encoded parameters from SDP
 	 */
-	setH264ParameterSets(sprop)
+	setH264ParameterSets(sprop: string): void
 	{
 		this.h264ParameterSets = sprop;
 	}
@@ -933,7 +1006,7 @@ class IncomingStreamTrack extends Emitter
 	 * Override the maximum period of time to wait for an out of order or rtx packet
 	 * @param {Number} maxWaitTime max wait time in ms (default: 0 if rtx is not supported or rtt based)
 	 */
-	setMaxWaitTime(maxWaitTime)
+	setMaxWaitTime(maxWaitTime: number): void
 	{
 		//For each source
 		for (let encoding of this.encodings.values())
@@ -943,17 +1016,18 @@ class IncomingStreamTrack extends Emitter
 	/**
 	 * Remove override for the maximum period of time to wait for an out of order or rtx packet
 	 */
-	resetMaxWaitTime()
+	resetMaxWaitTime(): void
 	{
 		//For each source
-		for (let encoding of this.encodings.values())
+		for (let encoding of this.encodings.values()) {
 			encoding.source.ResetMaxWaitTime();
+		}
 	}
 	
 	/**
 	 * Removes the track from the incoming stream and also detaches any attached outgoing track or recorder
 	 */
-	stop()
+	stop(): void
 	{
 		//Don't call it twice
 		if (this.stopped) return;
@@ -993,10 +1067,8 @@ class IncomingStreamTrack extends Emitter
 		//@ts-expect-error
 		this.receiver = null;
 	}
+
+	static sortByBitrateReverse = sortByBitrateReverse;
+    static getActiveLayersFromStats = getActiveLayersFromStats;
+    static updateStatsSimulcastIndexAndCodec = updateStatsSimulcastIndexAndCodec;
 }
-
-IncomingStreamTrack.sortByBitrateReverse = sortByBitrateReverse;
-IncomingStreamTrack.getActiveLayersFromStats = getActiveLayersFromStats;
-IncomingStreamTrack.updateStatsSimulcastIndexAndCodec = updateStatsSimulcastIndexAndCodec;
-
-module.exports = IncomingStreamTrack;

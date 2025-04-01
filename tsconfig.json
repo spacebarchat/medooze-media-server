@@ -8,15 +8,22 @@
       "declaration": true,
       // This compiler run should
       // only output d.ts files
-      "emitDeclarationOnly": true,
+      //"emitDeclarationOnly": true,
       // Types should go into this directory.
       // Removing this would place the .d.ts files
       // next to the .js files
-      "outDir": "build/types",
+      "outDir": "dist",
       // go to js file when using IDE functions like
       // "Go to Definition" in VSCode
-      "declarationMap": false,
+      "declarationMap": true,
       // don't check node modules
-      "skipLibCheck": true 
+      "skipLibCheck": true,
+      "esModuleInterop": true,
+      "module": "commonjs",
+      "target": "es6",
+      "moduleResolution": "node",
+      "strict": true,
+      "forceConsistentCasingInFileNames": true,
+      "noImplicitReturns": true, 
     }
   }

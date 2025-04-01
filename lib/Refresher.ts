@@ -1,58 +1,59 @@
-const IncomingStream		= require("./IncomingStream");
-const IncomingStreamTrack	= require("./IncomingStreamTrack");
-const Emitter		= require("medooze-event-emitter");
+import {IncomingStream} from "./IncomingStream";
+import {IncomingStreamTrack} from "./IncomingStreamTrack";
+import Emitter from "medooze-event-emitter";
 
-/**
- * @typedef {Object} RefresherEvents
- * @property {(self: Refresher) => void} stopped
- * @property {(self: Refresher) => void} refreshing A refresh is taking place
- */
+interface RefresherEvents {
+    stopped: (self: Refresher) => void;
+	/** A refreh is taking place */
+    refreshing: (self: Refresher) => void;
+}
 
 /**
  * Periodically request an I frame on all incoming stream or tracks
- * @extends {Emitter<RefresherEvents>}
  */
-class Refresher extends Emitter
+export class Refresher extends Emitter<RefresherEvents>
 {
-	/**
-	 * @ignore
-	 * @hideconstructor
-	 * private constructor
-	 */
-	constructor(/** @type {number} */ period)
+	tracks: Set<IncomingStreamTrack>;
+    interval: NodeJS.Timeout | undefined;
+
+	constructor(period: number)
 	{
 		//Init emitter
 		super();
 
 		//No tracks
-		this.tracks = /** @type {Set<IncomingStreamTrack>} */ (new Set());
+		this.tracks = new Set<IncomingStreamTrack>();
 		
-		//Listener for stop track events
-		this.ontrackstopped = (/** @type {IncomingStreamTrack} */ track) => {
-			//Remove from set
-			this.tracks.delete(track);
-		};
+		// bind `this` since this will be called from event handler
+		this.onTrackStopped = this.onTrackStopped.bind(this)
 
 		//Start refreshing
 		this.restart(period);
+	}
+
+	/** Listener for stop track events */
+	private onTrackStopped(track: IncomingStreamTrack) {
+		//Remove from set
+		this.tracks.delete(track);
 	}
 
 	/**
 	 * Restart refreshing interval
 	 * @param {Number} period - Refresh period in ms
 	 */
-	restart(period)
+	restart(period: number): void
 	{
 		//Stop previous one
 		clearInterval(this.interval);
 		//Start the refresh interval
-		this.interval = setInterval(()=>{
+		this.interval = setInterval(() => {
 			//Emit event
 			this.emit("refreshing",this);
 			//For each track on set
-			for (const track of this.tracks)
+			for (const track of this.tracks) {
 				//request an iframe
 				track.refresh();
+			}
 		}, period);
 	}
 
@@ -60,16 +61,15 @@ class Refresher extends Emitter
 	 * Add stream or track to request 
 	 * @param {IncomingStream|IncomingStreamTrack} streamOrTrack 
 	 */
-	add(streamOrTrack)
+	add(streamOrTrack: IncomingStream|IncomingStreamTrack): void
 	{
-		//If it is a media stream
 		if (streamOrTrack instanceof IncomingStream)
 		{
 			//Get all video tracks
-			for (const track of streamOrTrack.getVideoTracks())
+			for (const track of streamOrTrack.getVideoTracks()) {
 				//Add it
 				this.add(track);
-		//If it is a media stream
+			}
 		} else if (streamOrTrack instanceof IncomingStreamTrack) {
 			//Ensure it is a video one
 			if (streamOrTrack.getMedia()==="video")
@@ -77,7 +77,7 @@ class Refresher extends Emitter
 				//Add to set
 				this.tracks.add(streamOrTrack);
 				//Remove it on stop
-				streamOrTrack.once("stopped",this.ontrackstopped);
+				streamOrTrack.once("stopped",this.onTrackStopped);
 			}
 		}
 	}
@@ -86,24 +86,18 @@ class Refresher extends Emitter
 	 * Remove stream or track to request 
 	 * @param {IncomingStream|IncomingStreamTrack} streamOrTrack 
 	 */
-	remove(streamOrTrack)
+	remove(streamOrTrack: IncomingStream|IncomingStreamTrack): void
 	{
-		//If it is a media stream
 		if (streamOrTrack instanceof IncomingStream)
 		{
-			//Get all video tracks
-			for (const track of streamOrTrack.getVideoTracks())
-				//Remove it
+			for (const track of streamOrTrack.getVideoTracks()) {
 				this.remove(track);
-		//If it is a media stream
+			}
 		} else if (streamOrTrack instanceof IncomingStreamTrack) {
-			//Ensure it is a video one
 			if (streamOrTrack.getMedia()==="video")
 			{
-				//Add to set
 				this.tracks.delete(streamOrTrack);
-				//Remove it on stop
-				streamOrTrack.off("stopped",this.ontrackstopped);
+				streamOrTrack.off("stopped",this.onTrackStopped);
 			}
 		}
 	}
@@ -111,16 +105,16 @@ class Refresher extends Emitter
 	/**
 	 * Stop refresher
 	 */
-	stop()
+	stop(): void
 	{
 		//Stop interval
 		clearInterval(this.interval);
 		
 		//For each track on set
-		for (const track of this.tracks)
+		for (const track of this.tracks) {
 			//Remove stop edevent
-			track.off("stopped",this.ontrackstopped);
-		
+			track.off("stopped",this.onTrackStopped);
+		}
 		this.emit("stopped",this);
 		
 		//Stop emitter
@@ -131,5 +125,3 @@ class Refresher extends Emitter
 		this.tracks = null;
 	}
 }
-
-module.exports = Refresher;

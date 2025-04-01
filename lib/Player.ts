@@ -1,30 +1,28 @@
-const Native			= require("./Native");
-const SharedPointer		= require("./SharedPointer");
-const Emitter			= require("medooze-event-emitter");
-const SemanticSDP		= require("semantic-sdp");
-const IncomingStreamTrack	= require("./IncomingStreamTrack");
+import * as Native from "./Native";
+import * as SharedPointer from "./SharedPointer";
+import Emitter from "medooze-event-emitter";
+import {IncomingStreamTrack} from "./IncomingStreamTrack";
 
-const {
-	TrackInfo,
-} = require("semantic-sdp");
+interface PlayerEvents {
+    stopped: (self: Player) => void;
+	/** Playback ended */
+    ended: (self: Player) => void;
+}
 
-/**
- * @typedef {Object} PlayerEvents
- * @property {(self: Player) => void} stopped
- * @property {(self: Player) => void} ended Playback ended
- */
+interface PlayParams {
+    repeat?: boolean;
+}
 
-/**
- * @extends {Emitter<PlayerEvents>}
- */
-class Player extends Emitter
+export class Player extends Emitter<PlayerEvents>
 {
-	/**
-	 * @ignore
-	 * @hideconstructor
-	 * private constructor
-	 */
-	constructor(/** @type {string} */ filename)
+	player: Native.PlayerFacade;
+    tracks: Map<string, IncomingStreamTrack>;
+    repeat?: boolean;
+
+	// native callback
+	private onended: () => void;
+
+	constructor(filename: string)
 	{
 		//Init emitter
 		super();
@@ -43,7 +41,7 @@ class Player extends Emitter
 			throw new Error("MP4 filenamec could not be opened");
 		
 		//init track list
-		this.tracks = /** @type {Map<string, IncomingStreamTrack>} */ (new Map());
+		this.tracks = new Map();
 		
 		//Check if player has video track
 		if (this.player.HasVideoTrack())
@@ -52,10 +50,10 @@ class Player extends Emitter
 			const trackId = "video";
 			
 			//Get audio source
-			const source = SharedPointer(this.player.GetVideoSource());
+			const source = SharedPointer.SharedPointer(this.player.GetVideoSource());
 			
 			//Create new track
-			const incomingStreamTrack = new IncomingStreamTrack("video",trackId,null,null,null, {'':source});
+			const incomingStreamTrack = new IncomingStreamTrack("video",trackId,null!,null!,null!, {'':source}); // todo: figure out what to set here instead of a bunch of nulls
 			
 			//Add listener
 			incomingStreamTrack.once("stopped",()=>{
@@ -73,10 +71,10 @@ class Player extends Emitter
 			const trackId = "audio";
 			
 			//Get audio source
-			const source = SharedPointer(this.player.GetAudioSource());
+			const source = SharedPointer.SharedPointer(this.player.GetAudioSource());
 			
 			//Create new track
-			const incomingStreamTrack = new IncomingStreamTrack("audio",trackId,null,null,null, {'':source});
+			const incomingStreamTrack = new IncomingStreamTrack("audio",trackId,null!,null!,null!, {'':source}); // todo: figure out what to set here instead of a bunch of nulls
 			
 			//Add listener
 			incomingStreamTrack.once("stopped",()=>{
@@ -112,7 +110,7 @@ class Player extends Emitter
 	 * Get all the tracks
 	* @returns {Array<IncomingStreamTrack>}	- Array of tracks
 	 */
-	getTracks() 
+	getTracks(): IncomingStreamTrack[] 
 	{
 		//Return a track array
 		return Array.from(this.tracks.values());
@@ -121,7 +119,7 @@ class Player extends Emitter
 	 * Get an array of the media stream audio tracks
 	 * @returns {Array<IncomingStreamTrack>}	- Array of tracks
 	 */
-	getAudioTracks() 
+	getAudioTracks(): IncomingStreamTrack[] 
 	{
 		var audio = [];
 		
@@ -139,7 +137,7 @@ class Player extends Emitter
 	 * Get an array of the media stream video tracks
 	 * @returns {Array<IncomingStreamTrack>}	- Array of tracks
 	 */
-	getVideoTracks() 
+	getVideoTracks(): IncomingStreamTrack[] 
 	{
 		var video = [];
 		
@@ -158,7 +156,7 @@ class Player extends Emitter
 	 * @param {Object} params	
 	 * @param {Object} params.repeat - Repeat playback when file is ended
 	 */
-	play(params)
+	play(params?: PlayParams)
 	{
 		//Get params
 		this.repeat = params && params.repeat;
@@ -186,7 +184,7 @@ class Player extends Emitter
 	 * Start playback from given time
 	 * @param {Number} time - in miliseconds
 	 */
-	seek(time)
+	seek(time: number)
 	{
 		return this.player.Seek(time);
 	}
@@ -222,5 +220,3 @@ class Player extends Emitter
 	
 	
 }
-
-module.exports = Player;

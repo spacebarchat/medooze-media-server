@@ -1,71 +1,88 @@
-const SharedPointer	= require("./SharedPointer");
-const Emitter		= require("medooze-event-emitter");
-const LayerInfo		= require("./LayerInfo");
-const Native		= require("./Native");
-const IncomingStreamTrack = require("./IncomingStreamTrack");
-const SemanticSDP	= require("semantic-sdp");
+import * as SharedPointer from "./SharedPointer";
+import EventEmitter from "medooze-event-emitter";
+import * as LayerInfoMax from "./LayerInfo";
+import * as Native from "./Native";
+import { ActiveLayersInfo, Encoding, IncomingStreamTrack } from "./IncomingStreamTrack";
+import { TrackType } from "semantic-sdp";
 
-/** @typedef {IncomingStreamTrack.ActiveLayersInfo['layers'][number]} LayerInfo */
+type LayerInfo = ActiveLayersInfo['layers'][number];
 
-/**
- * @typedef {Object} LayerSelection
- * Object describing which layers to forward (only applies to video tracks, ignored otherwise).
- *
- * @property {string} [encodingId] rid value of the simulcast encoding of the track (default: first encoding available, or for {@link Transponder.select}, the current encoding (no change))
- * @property {number} [spatialLayerId] The spatial layer id to send to the outgoing stream (default: max layer available)
- * @property {number} [temporalLayerId] The temporal layer id to send to the outgoing stream (default: max layer available)
- * @property {number} [maxSpatialLayerId] Max spatial layer id (default: unlimited)
- * @property {number} [maxTemporalLayerId] Max temporal layer id (default: unlimited)
- * @property {number} [maxWidth] Max width (default: unlimited)
- * @property {number} [maxHeight] Max height (default: unlimited)
- */
+// Preserving original type definitions
+export interface LayerSelection {
+	//* rid value of the simulcast encoding of the track (default: first encoding available, or for {@link Transponder.select}, the current encoding (no change)) */
+    encodingId?: string;
+	//* The spatial layer id to send to the outgoing stream (default: max layer available) */
+    spatialLayerId?: number;
+	//* The temporal layer id to send to the outgoing stream (default: max layer available) */
+    temporalLayerId?: number;
+	//* Max spatial layer id (default: unlimited) */
+    maxSpatialLayerId?: number;
+	//* Max temporal layer id (default: unlimited) */
+    maxTemporalLayerId?: number;
+	//* Max width (default: unlimited) */
+    maxWidth?: number;
+	//* Max height (default: unlimited
+    maxHeight?: number;
+}
 
-/**
- * @typedef {Object} SetTargetBitrateOptions Options for configuring algorithm to select best encoding/layers
- * @property {"default" | "spatial-temporal" | "zig-zag-spatial-temporal" | "temporal-spatial" | "zig-zag-temporal-spatial"} [traversal] Traversal algorithm [Default: "default"]
- * @property {boolean} [strict] If there is not a layer with a bitrate lower thatn target, stop sending media [Default: false]
- * @property {boolean} [smooth] When going to a lower simulcast layer, keep the higher one visible [Default: true]
- * @property {boolean} [useDefaultEncoding] If there are no active layers, use the default encoding [Default: false]
- * @property {string[]} [codecs] Codec preferences list in descending order, layers with codec not present in codec list will be ignored
- */
+/** Options for configuring algorithm to select best encoding/layers */
+export interface SetTargetBitrateOptions {
+	/** Traversal algorithm [Default: "default"] */
+    traversal?: "default" | "spatial-temporal" | "zig-zag-spatial-temporal" | "temporal-spatial" | "zig-zag-temporal-spatial";
+	/** If there is not a layer with a bitrate lower thatn target, stop sending media [Default: false] */
+    strict?: boolean;
+	/** When going to a lower simulcast layer, keep the higher one visible [Default: true] */
+    smooth?: boolean;
+	/** If there are no active layers, use the default encoding [Default: false] */
+    useDefaultEncoding?: boolean;
+	/** Codec preferences list in descending order, layers with codec not present in codec list will be ignored */
+    codecs?: string[];
+}
 
-/**
- * @typedef {Object} TransponderEvents
- * @property {(muted: boolean) => void} muted
- * @property {(self: Transponder) => void} stopped
- */
+// Custom Number extension for additional properties
+export type TargetBitrateValue  = Number & TargetBitrateInfo;
 
-// in JSDoc syntax, 'Number' (boxed type) is taken to mean 'number' (primitive type),
-// so we have to do some shenanigans to refer to 'Number' specifically:
-const __aNumber = new Number;
-/** @typedef {typeof __aNumber & TargetBitrateInfo} TargetBitrateValue */
+/** properties of the number returned by {@link setTargetBitrate} and {@link setTargetBitrateAsync} */
+export interface TargetBitrateInfo {
+	/** available layers */
+    layers: LayerInfo[];
+	/** selected layer */
+    layer?: LayerInfo;
+	/** index of selected layer (unlike the other properties, this one will be -1 if no layer selected) */
+    layerIndex: number;
+    encodingId?: string;
+    spatialLayerId?: number;
+    temporalLayerId?: number;
+}
 
-/**
- * @typedef {Object} TargetBitrateInfo properties of the number returned by {@link setTargetBitrate} and {@link setTargetBitrateAsync}
- * @property {LayerInfo[]} layers available layers
- * @property {LayerInfo} [layer] selected layer
- * @property {number} layerIndex index of selected layer (unlike the other properties, this one will be -1 if no layer selected)
- * @property {string} [encodingId]
- * @property {number} [spatialLayerId]
- * @property {number} [temporalLayerId]
- */
+interface TransponderEvents {
+    muted: (muted: boolean) => void;
+    stopped: (self: Transponder) => void;
+}
 
 /**
  * Transponder copies data from an incoming track to an outgoing track and allows stream modifications
- * @extends {Emitter<TransponderEvents>}
  */
-class Transponder extends Emitter
+export class Transponder extends EventEmitter<TransponderEvents>
 {
-	/**
-	 * @ignore
-	 * @hideconstructor
-	 * private constructor
-	 */
+	transponder: Native.RTPStreamTransponderFacade;
+    media: TrackType;
+    track: IncomingStreamTrack | null;
+    encodingId: string | null;
+    encoding: Encoding | null;
+    muted: boolean;
+    spatialLayerId: number;
+    temporalLayerId: number;
+    maxSpatialLayerId: number;
+    maxTemporalLayerId: number;
+    maxWidth: number;
+    maxHeight: number;
+
 	constructor(
-		/** @type {Native.RTPStreamTransponderFacade} */ transponder,
-		/** @type {SemanticSDP.TrackType} */ media)
+        transponder: Native.RTPStreamTransponderFacade, 
+        media: TrackType
+    )
 	{
-		//Init emitter
 		super();
 
 		//Store native trasnceiver
@@ -73,51 +90,53 @@ class Transponder extends Emitter
 		//The media type
 		this.media = media;
 		//No track
-		this.track = /** @type {IncomingStreamTrack | null} */ (null);
-		this.encodingId = /** @type {string | null} */ (null);
-		this.encoding = /** @type {IncomingStreamTrack.Encoding | null} */ (null);
+		this.track = null;
+        this.encodingId = null;
+        this.encoding = null;
 		this.muted = false;
-		this.spatialLayerId = LayerInfo.MaxLayerId;
-		this.temporalLayerId = LayerInfo.MaxLayerId;
-		this.maxSpatialLayerId = LayerInfo.MaxLayerId;
-		this.maxTemporalLayerId = LayerInfo.MaxLayerId;
+		this.spatialLayerId = LayerInfoMax.MaxLayerId;
+		this.temporalLayerId = LayerInfoMax.MaxLayerId;
+		this.maxSpatialLayerId = LayerInfoMax.MaxLayerId;
+		this.maxTemporalLayerId = LayerInfoMax.MaxLayerId;
 		this.maxWidth = 0;
 		this.maxHeight = 0;
 		
-		//The listener for attached tracks end event
-		this.onAttachedTrackStopped = () => {
-			//If stopped already
-			if (!this.transponder)
-				//Do nothing
-				return;
-			//Signal dettached
-			this.track.detached();
-			//Dettach
-			this.track = null;
-			//Stop listening
-			this.transponder.ResetIncoming();
-			//No encoding
-			this.encodingId = null;
-			this.encoding = null;
-		};
-		//Listener for when new encodings become avialable
-		this.onAttachedTrackEncoding = (
-			/** @type {IncomingStreamTrack} */ incomingStreamTrack,
-			/** @type {IncomingStreamTrack.Encoding} */ encoding,
-		) => {
-			//If we don't have an encoding yet or we were attached to this encoding previously
-			if (this.track === incomingStreamTrack && (this.encodingId === null || this.encodingId == encoding.id))
-			{
-				//Start listening to the encoding
-				this.select({
-					encodingId		: encoding.id,
-					spatialLayerId		: this.spatialLayerId,
-					temporalLayerId		: this.temporalLayerId,
-					maxSpatialLayerId	: this.maxSpatialLayerId,
-					maxTemporalLayerId	: this.maxTemporalLayerId
-				});
-			} 
-		};
+		// bind `this` since these functions will be called from event handler
+		this.onAttachedTrackStopped = this.onAttachedTrackStopped.bind(this)
+		this.onAttachedTrackEncoding = this.onAttachedTrackEncoding.bind(this)
+	}
+
+	/** The listener for attached tracks end event */
+	private onAttachedTrackStopped() {
+		//If stopped already
+		if (!this.transponder)
+			//Do nothing
+			return;
+		//Signal dettached
+		this.track?.detached();
+		//Dettach
+		this.track = null;
+		//Stop listening
+		this.transponder.ResetIncoming();
+		//No encoding
+		this.encodingId = null;
+		this.encoding = null;
+	}
+
+	/** Listener for when new encodings become avialable */
+	private onAttachedTrackEncoding(incomingStreamTrack: IncomingStreamTrack, encoding: Encoding) {
+		//If we don't have an encoding yet or we were attached to this encoding previously
+		if (this.track === incomingStreamTrack && (this.encodingId === null || this.encodingId == encoding.id))
+		{
+			//Start listening to the encoding
+			this.select({
+				encodingId		: encoding.id,
+				spatialLayerId		: this.spatialLayerId,
+				temporalLayerId		: this.temporalLayerId,
+				maxSpatialLayerId	: this.maxSpatialLayerId,
+				maxTemporalLayerId	: this.maxTemporalLayerId
+			});
+		} 
 	}
 	
 	/**
@@ -126,7 +145,7 @@ class Transponder extends Emitter
 	 * @param {LayerSelection} [layers]		- Layer selection info
 	 * @param {Boolean} [smooth]			- Wait until next valid frame before switching to the new encoding
 	 */
-	setIncomingTrack(track, layers, smooth)
+	setIncomingTrack(track: IncomingStreamTrack | null, layers?: LayerSelection, smooth?: boolean): void
 	{
 
 		//If it is the same track
@@ -170,10 +189,10 @@ class Transponder extends Emitter
 			} else {
 				//Set defaults
 				const curated = Object.assign({
-					spatialLayerId		: LayerInfo.MaxLayerId,
-					temporalLayerId		: LayerInfo.MaxLayerId,
-					maxSpatialLayerId	: LayerInfo.MaxLayerId,
-					maxTemporalLayerId	: LayerInfo.MaxLayerId,
+					spatialLayerId		: LayerInfoMax.MaxLayerId,
+					temporalLayerId		: LayerInfoMax.MaxLayerId,
+					maxSpatialLayerId	: LayerInfoMax.MaxLayerId,
+					maxTemporalLayerId	: LayerInfoMax.MaxLayerId,
 					maxWidth		: 0,
 					maxHeight		: 0,
 				}, layers);
@@ -196,7 +215,7 @@ class Transponder extends Emitter
 			//If it has h264 properties
 			if (this.track.hasH264ParameterSets && this.track.hasH264ParameterSets())
 				//Set it
-				this.transponder.AppendH264ParameterSets(this.track.getH264ParameterSets());
+				this.transponder.AppendH264ParameterSets(this.track.getH264ParameterSets()!);
 		} else {
 			//Stop listening
 			this.transponder.ResetIncoming();
@@ -210,7 +229,7 @@ class Transponder extends Emitter
 	* Set out of band negotiated H264 parameter sets
 	* @param {String} sprop - H264 parameters sets
 	*/
-	appendH264ParameterSets(sprop)
+	appendH264ParameterSets(sprop: string): void
 	{
 		this.transponder.AppendH264ParameterSets(sprop);
 	}
@@ -218,7 +237,7 @@ class Transponder extends Emitter
 	/**
 	* Get Transponder media type
 	*/
-	getMedia()
+	getMedia(): TrackType
 	{
 		return this.media;
 	}
@@ -227,7 +246,7 @@ class Transponder extends Emitter
 	 * Get attached track
 	 * @returns {IncomingStreamTrack | null} track
 	 */
-	getIncomingTrack()
+	getIncomingTrack(): IncomingStreamTrack | null
 	{
 		return this.track;
 	}
@@ -235,7 +254,7 @@ class Transponder extends Emitter
 	/**
 	 * Get available encodings and layers
 	 */
-	getAvailableLayers()
+	getAvailableLayers(): ActiveLayersInfo | null
 	{
 		return this.track ? this.track.getActiveLayers() : null;
 	}
@@ -243,7 +262,7 @@ class Transponder extends Emitter
 	/**
 	 * Get available encodings and layers
 	 */
-	async getAvailableLayersAsync()
+	async getAvailableLayersAsync(): Promise<ActiveLayersInfo | null>
 	{
 		return this.track ? this.track.getActiveLayersAsync() : null;
 	}
@@ -253,7 +272,7 @@ class Transponder extends Emitter
 	 * Check if the track is muted or not
 	 * @returns {boolean} muted
 	 */
-	isMuted()
+	isMuted(): boolean
 	{
 		return this.muted;
 	}
@@ -263,7 +282,7 @@ class Transponder extends Emitter
 	 * This operation will not change the muted state of the stream this track belongs too.
 	 * @param {boolean} muting - if we want to mute or unmute
 	 */
-	mute(muting) 
+	mute(muting: boolean): void
 	{
 		//If we are different
 		if (this.muted!==muting)
@@ -282,7 +301,7 @@ class Transponder extends Emitter
 	 * Set intra frame forwarding mode
 	 * @param {boolean} intraOnlyForwarding - true if you want to forward only intra frames, false otherwise
 	 */
-	setIntraOnlyForwarding(intraOnlyForwarding) 
+	setIntraOnlyForwarding(intraOnlyForwarding: boolean): void 
 	{
 		//Set it in native object
 		this.transponder.SetIntraOnlyForwarding(!!intraOnlyForwarding);
@@ -295,7 +314,7 @@ class Transponder extends Emitter
 	 * @param {SetTargetBitrateOptions} [options]
 	 * @returns {TargetBitrateValue | undefined} Current bitrate of the selected encoding and layers, it also includes the selected layer indexes and available layers as properties of the Number object.
 	 */
-	setTargetBitrate(target, options) 
+	setTargetBitrate(target: number, options?: SetTargetBitrateOptions): TargetBitrateValue | undefined 
 	{
 		//Check track
 		if (!this.track)
@@ -306,49 +325,49 @@ class Transponder extends Emitter
 		//For optimum fit
 		let current		= -1;
 		let encodingId		= "";
-		let spatialLayerId	= LayerInfo.MaxLayerId;
-		let temporalLayerId	= LayerInfo.MaxLayerId;
+		let spatialLayerId	= LayerInfoMax.MaxLayerId;
+		let temporalLayerId	= LayerInfoMax.MaxLayerId;
 		//For minimum fit
 		let min			= Number.MAX_SAFE_INTEGER;
 		let encodingIdMin	= "";
-		let spatialLayerIdMin	= LayerInfo.MaxLayerId;
-		let temporalLayerIdMin	= LayerInfo.MaxLayerId;
+		let spatialLayerIdMin	= LayerInfoMax.MaxLayerId;
+		let temporalLayerIdMin	= LayerInfoMax.MaxLayerId;
 		
-		let ordering = /** @type {(a: LayerInfo, b: LayerInfo) => number} */ (/** @type {any} */ (false));
+		let ordering: ((a: LayerInfo, b: LayerInfo) => number) | undefined;
 		
 		//Helper for retrieving spatial info
-		const getSpatialLayerId = function(/** @type {LayerInfo} */ layer) {
+		const getSpatialLayerId = function(layer: LayerInfo) {
 			// Either spatialLayerId on SVC stream or simulcastIdx on simulcast stream
-			return layer.spatialLayerId!=LayerInfo.MaxLayerId ? layer.spatialLayerId : layer.simulcastIdx ;
+			return layer.spatialLayerId!=LayerInfoMax.MaxLayerId ? layer.spatialLayerId : layer.simulcastIdx ;
 		};
 
 		//Depending on the traversal method
 		switch (options?.traversal)
 		{
 			case "spatial-temporal":
-				ordering = (a,b) => ((getSpatialLayerId(b)*LayerInfo.MaxLayerId+b.temporalLayerId) - (getSpatialLayerId(a)*LayerInfo.MaxLayerId+a.temporalLayerId));
+				ordering = (a,b) => ((getSpatialLayerId(b)*LayerInfoMax.MaxLayerId+b.temporalLayerId) - (getSpatialLayerId(a)*LayerInfoMax.MaxLayerId+a.temporalLayerId));
 				break;
 			case "zig-zag-spatial-temporal":
-				ordering = (a,b) => (((getSpatialLayerId(b)+b.temporalLayerId+1)*LayerInfo.MaxLayerId-b.temporalLayerId) - ((getSpatialLayerId(a)+a.temporalLayerId+1)*LayerInfo.MaxLayerId-a.temporalLayerId));
+				ordering = (a,b) => (((getSpatialLayerId(b)+b.temporalLayerId+1)*LayerInfoMax.MaxLayerId-b.temporalLayerId) - ((getSpatialLayerId(a)+a.temporalLayerId+1)*LayerInfoMax.MaxLayerId-a.temporalLayerId));
 				break;
 			case "temporal-spatial":
-				ordering = (a,b) => ((b.temporalLayerId*LayerInfo.MaxLayerId+getSpatialLayerId(b)) - (a.temporalLayerId*LayerInfo.MaxLayerId+getSpatialLayerId(a)));
+				ordering = (a,b) => ((b.temporalLayerId*LayerInfoMax.MaxLayerId+getSpatialLayerId(b)) - (a.temporalLayerId*LayerInfoMax.MaxLayerId+getSpatialLayerId(a)));
 				break;
 			case "zig-zag-temporal-spatial":
-				ordering = (a,b) => (((getSpatialLayerId(b)+b.temporalLayerId+1)*LayerInfo.MaxLayerId-getSpatialLayerId(b)) - ((getSpatialLayerId(a)+a.temporalLayerId+1)*LayerInfo.MaxLayerId-getSpatialLayerId(a)));
+				ordering = (a,b) => (((getSpatialLayerId(b)+b.temporalLayerId+1)*LayerInfoMax.MaxLayerId-getSpatialLayerId(b)) - ((getSpatialLayerId(a)+a.temporalLayerId+1)*LayerInfoMax.MaxLayerId-getSpatialLayerId(a)));
 				break;
 			default:
 				//If we are filtering bymin/max we use the "spatial-tempral" ordering
 				//TODO: use (target)Width/(target)Height for ordering too?
 				if (this.maxWidth || this.maxHeight)
-					ordering = (a,b) => ((getSpatialLayerId(b)*LayerInfo.MaxLayerId+b.temporalLayerId) - (getSpatialLayerId(a)*LayerInfo.MaxLayerId+a.temporalLayerId));
+					ordering = (a,b) => ((getSpatialLayerId(b)*LayerInfoMax.MaxLayerId+b.temporalLayerId) - (getSpatialLayerId(a)*LayerInfoMax.MaxLayerId+a.temporalLayerId));
 		}
 
 		//If we want to filter by codecs
 		const codecs = options?.codecs?.map(codec => codec.toLowerCase());
-		/** @type {((a: LayerInfo, b: LayerInfo) => number) | undefined} */
+
 		const codecSortByPreference = codecs 
-			? (a,b) => codecs.indexOf(a.codec) - codecs.indexOf(b.codec)
+			? (a: LayerInfo,b: LayerInfo) => codecs.indexOf(a.codec) - codecs.indexOf(b.codec)
 			: undefined;
 		
 		//Get all active layers 
@@ -403,8 +422,8 @@ class Transponder extends Emitter
 			//If this layer is better than the one before
 			if (layerBitrate<=target && layerBitrate>current &&
 			    this.maxSpatialLayerId>=layer.spatialLayerId && this.maxTemporalLayerId>=layer.temporalLayerId &&
-			    (!this.maxWidth || ((layer.width || layer.targetWidth) <= this.maxWidth)) &&
-			    (!this.maxHeight || ((layer.height || layer.targetHeight) <= this.maxHeight))
+				(!this.maxWidth || ((layer.width ?? layer.targetWidth ?? 0) <= this.maxWidth)) &&
+				(!this.maxHeight || ((layer.height ?? layer.targetHeight ?? 0) <= this.maxHeight))
 			)
 			{
 				//Use it as is
@@ -500,7 +519,7 @@ class Transponder extends Emitter
 	 * @param {SetTargetBitrateOptions} [options]
 	 * @returns {Promise<TargetBitrateValue | undefined>} Current bitrate of the selected encoding and layers, it also includes the selected layer indexes and available layers as properties of the Number object.
 	 */
-	async setTargetBitrateAsync(target, options) 
+	async setTargetBitrateAsync(target: number, options?: SetTargetBitrateOptions): Promise<TargetBitrateValue | undefined> 
 	{
 		//Check track
 		if (!this.track)
@@ -511,49 +530,49 @@ class Transponder extends Emitter
 		//For optimum fit
 		let current		= -1;
 		let encodingId		= "";
-		let spatialLayerId	= LayerInfo.MaxLayerId;
-		let temporalLayerId	= LayerInfo.MaxLayerId;
+		let spatialLayerId	= LayerInfoMax.MaxLayerId;
+		let temporalLayerId	= LayerInfoMax.MaxLayerId;
 		//For minimum fit
 		let min			= Number.MAX_SAFE_INTEGER;
 		let encodingIdMin	= "";
-		let spatialLayerIdMin	= LayerInfo.MaxLayerId;
-		let temporalLayerIdMin	= LayerInfo.MaxLayerId;
+		let spatialLayerIdMin	= LayerInfoMax.MaxLayerId;
+		let temporalLayerIdMin	= LayerInfoMax.MaxLayerId;
 		
-		let ordering = /** @type {(a: LayerInfo, b: LayerInfo) => number} */ (/** @type {any} */ (false));
+		let ordering: ((a: LayerInfo, b: LayerInfo) => number) | undefined;
 		
 		//Helper for retrieving spatial info
-		const getSpatialLayerId = function(/** @type {LayerInfo} */ layer) {
+		const getSpatialLayerId = function(layer: LayerInfo) {
 			// Either spatialLayerId on SVC stream or simulcastIdx on simulcast stream
-			return layer.spatialLayerId!=LayerInfo.MaxLayerId ? layer.spatialLayerId : layer.simulcastIdx ;
+			return layer.spatialLayerId!=LayerInfoMax.MaxLayerId ? layer.spatialLayerId : layer.simulcastIdx ;
 		};
 	
 		//Depending on the traversal method
 		switch (options?.traversal)
 		{
 			case "spatial-temporal":
-				ordering = (a,b) => ((getSpatialLayerId(b)*LayerInfo.MaxLayerId+b.temporalLayerId) - (getSpatialLayerId(a)*LayerInfo.MaxLayerId+a.temporalLayerId));
+				ordering = (a,b) => ((getSpatialLayerId(b)*LayerInfoMax.MaxLayerId+b.temporalLayerId) - (getSpatialLayerId(a)*LayerInfoMax.MaxLayerId+a.temporalLayerId));
 				break;
 			case "zig-zag-spatial-temporal":
-				ordering = (a,b) => (((getSpatialLayerId(b)+b.temporalLayerId+1)*LayerInfo.MaxLayerId-b.temporalLayerId) - ((getSpatialLayerId(a)+a.temporalLayerId+1)*LayerInfo.MaxLayerId-a.temporalLayerId));
+				ordering = (a,b) => (((getSpatialLayerId(b)+b.temporalLayerId+1)*LayerInfoMax.MaxLayerId-b.temporalLayerId) - ((getSpatialLayerId(a)+a.temporalLayerId+1)*LayerInfoMax.MaxLayerId-a.temporalLayerId));
 				break;
 			case "temporal-spatial":
-				ordering = (a,b) => ((b.temporalLayerId*LayerInfo.MaxLayerId+getSpatialLayerId(b)) - (a.temporalLayerId*LayerInfo.MaxLayerId+getSpatialLayerId(a)));
+				ordering = (a,b) => ((b.temporalLayerId*LayerInfoMax.MaxLayerId+getSpatialLayerId(b)) - (a.temporalLayerId*LayerInfoMax.MaxLayerId+getSpatialLayerId(a)));
 				break;
 			case "zig-zag-temporal-spatial":
-				ordering = (a,b) => (((getSpatialLayerId(b)+b.temporalLayerId+1)*LayerInfo.MaxLayerId-getSpatialLayerId(b)) - ((getSpatialLayerId(a)+a.temporalLayerId+1)*LayerInfo.MaxLayerId-getSpatialLayerId(a)));
+				ordering = (a,b) => (((getSpatialLayerId(b)+b.temporalLayerId+1)*LayerInfoMax.MaxLayerId-getSpatialLayerId(b)) - ((getSpatialLayerId(a)+a.temporalLayerId+1)*LayerInfoMax.MaxLayerId-getSpatialLayerId(a)));
 				break;
 			default:
 				//If we are filtering bymin/max we use the "spatial-tempral" ordering
 				//TODO: use (target)Width/(target)Height for ordering too?
 				if (this.maxWidth || this.maxHeight)
-					ordering = (a,b) => ((getSpatialLayerId(b)*LayerInfo.MaxLayerId+b.temporalLayerId) - (getSpatialLayerId(a)*LayerInfo.MaxLayerId+a.temporalLayerId));
+					ordering = (a,b) => ((getSpatialLayerId(b)*LayerInfoMax.MaxLayerId+b.temporalLayerId) - (getSpatialLayerId(a)*LayerInfoMax.MaxLayerId+a.temporalLayerId));
 		}
 
 		//If we want to filter by codecs
 		const codecs = options?.codecs?.map(codec => codec.toLowerCase());
-		/** @type {((a: LayerInfo, b: LayerInfo) => number) | undefined} */
+
 		const codecSortByPreference = codecs 
-			? (a,b) => codecs.indexOf(a.codec) - codecs.indexOf(b.codec)
+			? (a: LayerInfo,b: LayerInfo) => codecs.indexOf(a.codec) - codecs.indexOf(b.codec)
 			: undefined;
 		
 		//Get all active layers 
@@ -608,8 +627,8 @@ class Transponder extends Emitter
 			//If this layer is better than the one before
 			if (layerBitrate<=target && layerBitrate>current &&
 			    this.maxSpatialLayerId>=layer.spatialLayerId && this.maxTemporalLayerId>=layer.temporalLayerId &&
-			    (!this.maxWidth || ((layer.width || layer.targetWidth) <= this.maxWidth)) &&
-			    (!this.maxHeight || ((layer.height || layer.targetHeight) <= this.maxHeight))
+				(!this.maxWidth || ((layer.width ?? layer.targetWidth ?? 0) <= this.maxWidth)) &&
+				(!this.maxHeight || ((layer.height ?? layer.targetHeight ?? 0) <= this.maxHeight))
 			)
 			{
 				//Use it as is
@@ -703,15 +722,15 @@ class Transponder extends Emitter
 	 * @param {LayerSelection} [layers]		- Layer selection info
 	 * @param {Boolean} [smooth]			- Wait until next valid frame before switching to the new encoding
 	 */
-	select(layers,smooth)
+	select(layers?: LayerSelection, smooth?: boolean): void
 	{
 		//Set defaults
 		const curated = Object.assign({
 			encodingId		: this.getSelectedEncoding(),
-			spatialLayerId		: LayerInfo.MaxLayerId,
-			temporalLayerId		: LayerInfo.MaxLayerId,
-			maxSpatialLayerId	: LayerInfo.MaxLayerId,
-			maxTemporalLayerId	: LayerInfo.MaxLayerId,
+			spatialLayerId		: LayerInfoMax.MaxLayerId,
+			temporalLayerId		: LayerInfoMax.MaxLayerId,
+			maxSpatialLayerId	: LayerInfoMax.MaxLayerId,
+			maxTemporalLayerId	: LayerInfoMax.MaxLayerId,
 			maxWidth		: 0,
 			maxHeight		: 0,
 		}, layers);
@@ -734,7 +753,7 @@ class Transponder extends Emitter
 	 * @param {String} encodingId - rid value of the simulcast encoding of the track
 	 * @param {Boolean} [smooth] - Wait until next valid frame before switching to the new encoding
 	 */
-	selectEncoding(encodingId,smooth) 
+	selectEncoding(encodingId: string, smooth?: boolean): void 
 	{
 		//If not found
 		if (!this.track)
@@ -762,7 +781,7 @@ class Transponder extends Emitter
 	 * Return the encoding that is being forwarded, or null if no track attached
 	 * @returns {String | null} encodingId
 	 */
-	getSelectedEncoding()
+	getSelectedEncoding(): string | null
 	{
 		// Return the encoding that is being forwarded
 		return this.encodingId;
@@ -772,7 +791,7 @@ class Transponder extends Emitter
 	 * Return the spatial layer id that is being forwarded 
 	 * @returns {Number} spatial layer id
 	 */
-	getSelectedSpatialLayerId()
+	getSelectedSpatialLayerId(): number
 	{
 		// Return the spatial layer id that is being forwarded
 		return this.spatialLayerId;
@@ -782,7 +801,7 @@ class Transponder extends Emitter
 	 * Return the temporal layer id that is being forwarded
 	 * @returns {Number} temporal layer id
 	 */
-	getSelectedTemporalLayerId()
+	getSelectedTemporalLayerId(): number
 	{
 		// Return the temporal layer id that is being forwarded
 		return this.temporalLayerId;
@@ -791,7 +810,7 @@ class Transponder extends Emitter
 	/**
 	 * Get current selected layer info
 	 */
-	getSelectedLayer()
+	getSelectedLayer(): LayerInfo | null
 	{
 	
 		//Check track
@@ -802,13 +821,13 @@ class Transponder extends Emitter
 		const layers = this.track.getActiveLayers().layers;
 
 		//Find current layer
-		return layers.find((layer)=>layer.encodingId==this.encodingId && layer.spatialLayerId==this.spatialLayerId && layer.temporalLayerId==this.temporalLayerId);
+		return layers.find((layer)=>layer.encodingId==this.encodingId && layer.spatialLayerId==this.spatialLayerId && layer.temporalLayerId==this.temporalLayerId) ?? null;
 	}
 
 	/**
 	 * Get current selected layer info
 	 */
-	async getSelectedLayerAsync()
+	async getSelectedLayerAsync(): Promise<LayerInfo | null>
 	{
 	
 		//Check track
@@ -819,7 +838,7 @@ class Transponder extends Emitter
 		const layers = (await this.track.getActiveLayersAsync()).layers;
 
 		//Find current layer
-		return layers.find((layer)=>layer.encodingId==this.encodingId && layer.spatialLayerId==this.spatialLayerId && layer.temporalLayerId==this.temporalLayerId);
+		return layers.find((layer)=>layer.encodingId==this.encodingId && layer.spatialLayerId==this.spatialLayerId && layer.temporalLayerId==this.temporalLayerId) ?? null;
 	}
 	
 	/**
@@ -827,7 +846,7 @@ class Transponder extends Emitter
 	 * @param {Number} spatialLayerId The spatial layer id to send to the outgoing stream
 	 * @param {Number} temporalLayerId The temporal layer id to send to the outgoing stream
 	 */
-	selectLayer(spatialLayerId,temporalLayerId)
+	selectLayer(spatialLayerId: number, temporalLayerId: number): void
 	{
 		//Limit with max layers allowed
 		if (this.maxSpatialLayerId)
@@ -853,7 +872,7 @@ class Transponder extends Emitter
 	 * @param {Number} maxSpatialLayerId  - Max spatial layer id
 	 * @param {Number} maxTemporalLayerId - Max temporal layer id
 	 */
-	setMaximumLayers(maxSpatialLayerId,maxTemporalLayerId)
+	setMaximumLayers(maxSpatialLayerId: number, maxTemporalLayerId: number): void
 	{
 		//Check both are higher layers than the base layer
 		if (maxSpatialLayerId<0 || maxTemporalLayerId<0)
@@ -869,7 +888,7 @@ class Transponder extends Emitter
 	 * @param {Number} maxWidth  - Max width (0: unlimited)
 	 * @param {Number} maxHeight - Max height (0: unlimited)
 	 */
-	setMaximumDimensions(maxWidth, maxHeight)
+	setMaximumDimensions(maxWidth: number, maxHeight: number): void
 	{
 		//Store them
 		this.maxWidth  = maxWidth;
@@ -879,7 +898,7 @@ class Transponder extends Emitter
 	/**
 	 * Stop this transponder, will dettach the OutgoingStreamTrack
 	 */
-	stop()
+	stop(): void
 	{
 		//Don't call it twice
 		if (!this.transponder) return;
@@ -896,13 +915,9 @@ class Transponder extends Emitter
 		super.stop();
 
 		//Remove transport reference, so destructor is called on GC
-		//@ts-expect-error
-		this.transponder = null;
+		(this.transponder as any) = null;
 		//Remove track referecne also
 		this.track = null;
 	}
 	
 };
-
-
-module.exports = Transponder;

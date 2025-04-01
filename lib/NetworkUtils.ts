@@ -1,15 +1,17 @@
-const util = require('util');
-const dgram = require('dgram');
-const events = require('events');
+import util from 'util';
+import dgram from 'dgram';
+import events from 'events';
 
-const be32 = (/** @type {number} */ x) => {
+type CIDR = readonly [number, number];
+
+const be32 = (x: number): Buffer => {
 	if (x !== (x >>> 0))
 		throw Error(`not a u32: ${x}`)
 	const r = Buffer.alloc(4);
 	r.writeUInt32BE(x);
 	return r;
 }
-const be16 = (/** @type {number} */ x) => {
+const be16 = (x: number): Buffer => {
 	if (x !== (x & 0xFFFF))
 		throw Error(`not a u16: ${x}`)
 	const r = Buffer.alloc(2);
@@ -19,8 +21,7 @@ const be16 = (/** @type {number} */ x) => {
 
 
 // Utilities to manipulate MAC addresses
-
-function formatMac(/** @type {Uint8Array} */ mac)
+function formatMac(mac: Uint8Array): string
 {
 	if (!(mac instanceof Uint8Array && mac.length === 6))
 		throw TypeError('invalid MAC address');
@@ -29,8 +30,7 @@ function formatMac(/** @type {Uint8Array} */ mac)
 
 
 // Utilities to manipulate IPv4 addresses
-
-const verifyRange = (/** @type {string} */ xStr, /** @type {number} */ max) => {
+const verifyRange = (xStr: string, max: number): number => {
 	const x = parseInt(xStr);
 	if (x > max)
 		throw Error(`${x} exceeds ${max}`);
@@ -38,7 +38,7 @@ const verifyRange = (/** @type {string} */ xStr, /** @type {number} */ max) => {
 }
 
 /** parse a dot-separated IPv4 into a normalized address as u32be */
-function parseIPv4(/** @type {string} */ ip)
+function parseIPv4(ip: string): number
 {
 	if (!/^(?:\d+\.){3}\d+$/.test(ip))
 		throw Error(`invalid IPv4: ${ip}`);
@@ -46,22 +46,20 @@ function parseIPv4(/** @type {string} */ ip)
 	return rawAddr.readUInt32BE();
 }
 
-/** @typedef {readonly [number, number]} CIDR */
-
 /** parse a CIDR into a normalized [address as u32be, prefix length] tuple */
-function parseCIDR(/** @type {string} */ cidr)
+function parseCIDR(cidr: string): CIDR
 {
 	if (!/^[^/]+\/\d+$/.exec(cidr))
 		throw Error(`invalid CIDR: ${cidr}`);
 	const [addr, prefix] = cidr.split('/');
-	return /** @type {const} */ ([parseIPv4(addr), verifyRange(prefix, 32)]);
+	return ([parseIPv4(addr), verifyRange(prefix, 32)]);
 }
 
-const cidrMask = (/** @type {number} */ n) => (~0) << (32 - n);
-const isInsidePrefix = (/** @type {CIDR} */ prefix, /** @type {CIDR} */ addr) => prefix[1] <= addr[1] && !((prefix[0] ^ addr[0]) & cidrMask(prefix[1]));
-const isReservedAddress = (/** @type {CIDR} */ addr) => reservedRanges.some(range => isInsidePrefix(range, addr));
+const cidrMask = (n: number): number => (~0) << (32 - n);
+const isInsidePrefix = (prefix: CIDR, addr: CIDR): boolean => prefix[1] <= addr[1] && !((prefix[0] ^ addr[0]) & cidrMask(prefix[1]));
+const isReservedAddress = (addr: CIDR): boolean => reservedRanges.some(range => isInsidePrefix(range, addr));
 
-const reservedRanges = [
+const reservedRanges: CIDR[] = [
 	'0.0.0.0/8',
 	'10.0.0.0/8',
 	'100.64.0.0/10',
@@ -85,7 +83,6 @@ const reservedRanges = [
 // Utilities to query network configuration through Netlink
 // (since this is only available on Linux, we must make sure
 // to handle module not existing on other platforms)
-
 const netlink = (() => {
 	try {
 		return require('netlink');
@@ -99,7 +96,7 @@ const netlink = (() => {
  * @template T
  * @param {(socket: import('netlink').RtNetlinkSocket) => PromiseLike<T>} callback
  */
-async function withSocket(callback)
+async function withSocket<T>(callback: (socket: any) => PromiseLike<T>): Promise<T>
 {
 	if (!netlink)
 		throw Error('netlink unavailable or failed to import');
@@ -111,21 +108,22 @@ async function withSocket(callback)
 	}
 }
 
-/**
- * @typedef InterfaceRawConfig
- * @property {number} index Interface index (ifindex)
- * @property {string} lladdr MAC address
- * @property {readonly [number, string]} defaultRoute
- */
+interface InterfaceRawConfig {
+	/** Interface index (ifindex) */
+    index: number;
+	/** MAC address */
+    lladdr: string;
+    defaultRoute: readonly [number, string];
+}
 
 /**
  * get configuration of an interface by name
  * @returns {Promise<InterfaceRawConfig>}
  */
-const getInterfaceRawConfig = (/** @type {string} */ name) => withSocket(async rtNetlink => {
+export const getInterfaceRawConfig = (name: string): Promise<InterfaceRawConfig> => withSocket(async rtNetlink => {
 	// fetch link
 	const [ link ] = await rtNetlink.getLink({}, { ifname: name })
-		.catch(error => { throw Error(`failed to find interface ${name}: ${error}`) });
+		.catch((error: any) => { throw Error(`failed to find interface ${name}: ${error}`) });
 	const { data: { index, type }, attrs: { address: lladdr } } =
 		/** @type {(typeof link) & { data: { index: number } }} */ (link);
 	if (type !== 'ETHER')
@@ -134,27 +132,27 @@ const getInterfaceRawConfig = (/** @type {string} */ name) => withSocket(async r
 		throw Error('no physical address found on interface');
 
 	// fetch IPv4 routes, find default route, check there's a gateway, resolve it
-	const routes = (await rtNetlink.getRoutes())
+	const routes: any[] = ((await rtNetlink.getRoutes()) as any[])
 		.filter(route => route.data.family === 2 && route.attrs.oif === index && route.data.type === 'UNICAST') // filter ourselves, kernel seems to be buggy
 		.filter(route => route.data.dstLen === 0 && route.attrs.gateway);
-	const defaultRoute = routes.length ? 
+	
+	const defaultRoute: readonly [number, string] = routes.length ? 
 		(await collectRoutingInfoWithRoute(rtNetlink, index, routes[0], routes[0].attrs.gateway.readUInt32BE())) :
-		/** @type {const} */ ([ 0, '00:00:00:00:00:00' ]); // silently give an invalid value
+		([ 0, '00:00:00:00:00:00' ]); // silently give an invalid value
 
 	return { index, lladdr: formatMac(lladdr), defaultRoute };
 });
 
 const IPPROTO_UDP = 17
 
-/** @type {<T>(list: T[], name: string) => T | Promise<T>} */
-const extractOne = (list, name) =>
-	list.length === 1 ? list[0] : Promise.reject(`expected one ${name}, ${list.length} returned`);
+const extractOne = <T>(list: T[], name: string): T | Promise<T> =>
+    list.length === 1 ? list[0] : Promise.reject(`expected one ${name}, ${list.length} returned`);
 
-const collectCandidateInfo = (
-	/** @type {string} */ ipStr,
-	/** @type {number} */ port,
-	/** @type {number} */ ifindex,
-) => withSocket(async rtNetlink => {
+export const collectCandidateInfo = async (
+    ipStr: string,
+    port: number,
+    ifindex: number
+): Promise<readonly [number, string]> => withSocket(async rtNetlink => {
 	const ip = parseIPv4(ipStr);
 
 
@@ -166,8 +164,8 @@ const collectCandidateInfo = (
 		{ family: 2, flags: { fibMatch: true } },
 		{ dst: be32(ip), ipProto: Buffer.of(IPPROTO_UDP), dport: be16(port) })
 		.then(
-			res => extractOne(res, 'route'),
-			err => Promise.reject(new Error(`routing failed: ${err}`))
+			(			res: unknown[]) => extractOne(res, 'route'),
+			(			err: any) => Promise.reject(new Error(`routing failed: ${err}`))
 		);
 
 	const { attrs: { gateway, oif } } = route;
@@ -197,7 +195,13 @@ const collectCandidateInfo = (
  * @param {number} dst Resolved next hop address for route
  * @returns {Promise<readonly [number, string]>} selected route as a (source IP, destination MAC) tuple
  */
-const collectRoutingInfoWithRoute = async (rtNetlink, ifindex, route, dst) => {
+const collectRoutingInfoWithRoute = async (
+    rtNetlink: any, 
+    ifindex: number, 
+    route: any, 
+    dst: number
+): Promise<readonly [number, string]> =>
+{
 	const { data: { scope }, attrs: { prefsrc } } = route;
 
 	// as for source: to replicate Linux we should use prefsrc if present, otherwise
@@ -205,9 +209,9 @@ const collectRoutingInfoWithRoute = async (rtNetlink, ifindex, route, dst) => {
 	let src = prefsrc && prefsrc.readUInt32BE();
 	if (!src) {
 		const localnetScope = netlink.rt.RouteScope.HOST;
-		const parseAddress = addr => [ addr.attrs.address.readUInt32BE(), addr.data.prefixlen ]
+		const parseAddress = (addr: any) => [ addr.attrs.address.readUInt32BE(), addr.data.prefixlen ] as CIDR
 		const addresses = await rtNetlink.getAddresses({ family: 2, index: ifindex });
-		const matches = addresses.filter(addr => 
+		const matches = addresses.filter((addr: any) => 
 			!addr.data.flags.secondary &&
 			Math.min(addr.data.scope, localnetScope) <= netlink.rt.RouteScope[scope] &&
 			isInsidePrefix(parseAddress(addr), [dst, 32]));
@@ -227,8 +231,8 @@ const collectRoutingInfoWithRoute = async (rtNetlink, ifindex, route, dst) => {
 	// once subscription is active, obtain current ARP entry (if any)
 	let entry = await rtNetlink.getNeighbor({ family: 2, ifindex }, { dst: be32(dst) })
 		.then(
-			res => extractOne(res, 'neighbor'),
-			err => (err && err.message === 'Request rejected: ENOENT') ? undefined : Promise.reject(err)
+			(res: unknown[]) => extractOne(res, 'neighbor'),
+			(err: any) => (err && err.message === 'Request rejected: ENOENT') ? undefined : Promise.reject(err)
 		);
 
 	// if needed, trigger an ARP probe
@@ -241,7 +245,7 @@ const collectRoutingInfoWithRoute = async (rtNetlink, ifindex, route, dst) => {
 
 		// re-obtain the entry, should now be in probing state
 		entry = await rtNetlink.getNeighbor({ family: 2, ifindex }, { dst: be32(dst) })
-			.then(res => extractOne(res, 'neighbor'));
+			.then((res: unknown[]) => extractOne(res, 'neighbor'));
 	}
 
 	// if needed, wait until (re)probing finishes
@@ -249,7 +253,7 @@ const collectRoutingInfoWithRoute = async (rtNetlink, ifindex, route, dst) => {
 		// wait for next update of this entry
 		while (true) {
 			const [msg] = await events.once(rtNetlink, 'message');
-			entry = msg.find(msg =>
+			entry = msg.find((msg: any) =>
 				msg.kind === 'neighbor' && msg.data.family === 2 && msg.data.ifindex === ifindex &&
 				msg.attrs.dst.readUInt32BE() === dst);
 			if (entry) break;
@@ -263,10 +267,4 @@ const collectRoutingInfoWithRoute = async (rtNetlink, ifindex, route, dst) => {
 	if (state && (state.permanent || state.reachable || state.stale || state.delay))
 		return [ src, formatMac(entry.attrs.lladdr) ];
 	throw Error(`unexpected ARP state: ${util.inspect(state)}`);
-};
-
-
-module.exports = {
-	getInterfaceRawConfig : getInterfaceRawConfig,
-	collectCandidateInfo : collectCandidateInfo,
 };

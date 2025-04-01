@@ -1,67 +1,100 @@
-const Native		= require("./Native");
-const SharedPointer	= require("./SharedPointer");
-const Emitter		= require("medooze-event-emitter");
-const SemanticSDP	= require("semantic-sdp");
-const {
-	SDPInfo,
-	Setup,
-	MediaInfo,
-	CandidateInfo,
-	DTLSInfo,
-	ICEInfo,
-	StreamInfo,
-	TrackInfo,
-	SourceGroupInfo,
-} = require("semantic-sdp");
+import * as Native from "./Native";
+import * as SharedPointer from "./SharedPointer";
+import Emitter from "medooze-event-emitter";
+import { 
+    SDPInfo, 
+    Setup, 
+    MediaInfo, 
+    CandidateInfo, 
+    DTLSInfo, 
+    ICEInfo, 
+    StreamInfo, 
+    TrackInfo, 
+    SourceGroupInfo,
+    TrackType 
+} from "semantic-sdp";
 
-const Transponder	= require("./Transponder");
+import { LayerSelection, Transponder } from "./Transponder";
+import { IncomingStreamTrack } from "./IncomingStreamTrack";
+import {SSRCs, Transport} from "./Transport";
 
-/**
- * @typedef {Object} TrackStats stats for media, rtx, and fec sources (if used)
- * @property {number} timestamp timestamp on when this stats were created
- * @property {MediaStats} media stats for the media stream
- * @property {MediaStats} fec stats for the FEC stream
- * @property {MediaStats} rtx stats for the RTX stream
- * @property {number} [remb] remote estimated bitate (if remb is in use)
- * @property {number} numFrames Total sent frames
- * @property {number} numFramesDelta sent frames during last second
- * @property {number} numPackets number of rtp packets sent
- * @property {number} numPacketsDelta number of rtp packets sent during last second 
- * @property {number} rtt Round Trip Time in ms
- * @property {number} bitrate Bitrate for media stream only in bps
- * @property {number} total Accumulated bitrate for media, rtx and fec streams in bps (deprecated)
- * @property {number} totalBitrate Accumulated bitrate for media, rtx and fec streams in bps
- * @property {number} totalBytes total rtp sent bytes for this layer
- */
+/** Stats for media, rtx, and fec sources (if used) */
+export interface OutgoingTrackStats {
+	/** Timestamp on when this stats were created */
+    timestamp: number;
+	/** Stats for the media stream */
+    media: OutgoingMediaStats;
+	/** Stats for the FEC stream */
+    fec: OutgoingMediaStats;
+	/** Stats for the RTX stream */
+    rtx: OutgoingMediaStats;
+	/** Remote estimated bitrate (if remb is in use) */
+    remb?: number;
+	/** Total sent frames */
+    numFrames: number;
+	/** Sent frames during last second */
+    numFramesDelta: number;
+	/** Number of rtp packets sent */
+    numPackets: number;
+	/** Number of rtp packets sent during last second */
+    numPacketsDelta: number;
+	/** Round Trip Time in ms */
+    rtt: number;
+	/** Bitrate for media stream only in bps */
+    bitrate: number;
+	/** Accumulated bitrate for media, rtx and fec streams in bps (deprecated)
+	 * @deprecated
+	 */
+    total?: number;
+	/** Accumulated bitrate for media, rtx and fec streams in bps */
+    totalBitrate: number;
+	/** Total rtp sent bytes for this layer */
+    totalBytes: number;
+}
 
-/**
- * @typedef {Object} MediaStats stats for each RTP source
- * @property {number} rtt Round Trip Time in ms
- * @property {number} numFrames Total sent frames
- * @property {number} numFramesDelta sent frames during last second
- * @property {number} numPackets Number of rtp packets sent
- * @property {number} numPacketsDelta Number of rtp packets sent during last second
- * @property {number} numRTCPPackets Number of rtcp packets sent
- * @property {number} totalBytes Total rtp sent bytes
- * @property {number} totalRTCPBytes Total rtp sent bytes
- * @property {number} bitrate Average bitrate sent during last second in bps
- * @property {number} totalBitrate Accumulated bitrate for media and rtx streams in bps 
- * @property {number} reportCount Number of RTCP receiver reports received
- * @property {number} reportCountDelta Number of RTCP receiver reports received during last second
- * @property {ReceiverReport} [reported] Last report, if available
- * 
- */
+/** Stats for each RTP source */
+export interface OutgoingMediaStats {
+	/** Round Trip Time in ms */
+    rtt: number;
+	/** Total sent frames */
+    numFrames: number;
+	/** Sent frames during last second */
+    numFramesDelta: number;
+	/** Number of rtp packets sent */
+    numPackets: number;
+	/** Number of rtp packets sent during last second */
+    numPacketsDelta: number;
+	/** Number of rtcp packets sent */
+    numRTCPPackets: number;
+	/** Total rtp sent bytes */
+    totalBytes: number;
+	/** Total rtp sent bytes */
+    totalRTCPBytes: number;
+	/** Average bitrate sent during last second in bps */
+    bitrate: number;
+	/** Accumulated bitrate for media and rtx streams in bps */
+    totalBitrate: number;
+	/** Number of RTCP receiver reports received */
+    reportCount: number;
+	/** Number of RTCP receiver reports received during last second */
+    reportCountDelta: number;
+	/** Last report, if available */
+    reported?: ReceiverReport;
+}
 
-/**
- * @typedef {Object} ReceiverReport RTP receiver report stats
- * @property {number} lostCount Total packet loses reported
- * @property {number} lostCountDelta Packet losses reported in last second
- * @property {number} fractionLost Fraction loss media reported during last second
- * @property {number} jitter Last reported jitter buffer value
- */
+/** RTP receiver report stats */
+export interface ReceiverReport {
+	/** Total packet loses reported */
+    lostCount: number;
+	/** Packet losses reported in last second */
+    lostCountDelta: number;
+	/** Fraction loss media reported during last second */
+    fractionLost: number;
+	/** Last reported jitter buffer value */
+    jitter: number;
+}
 
-/** @returns {TrackStats} */
-function getSourceStats(/** @type {Native.RTPOutgoingSourceGroup} */ source)
+function getSourceStats(source: Native.RTPOutgoingSourceGroup): OutgoingTrackStats
 {
 	const mediaStats = getStatsFromOutgoingSource(source.media);
 	const rtxStats = getStatsFromOutgoingSource(source.rtx);
@@ -85,8 +118,7 @@ function getSourceStats(/** @type {Native.RTPOutgoingSourceGroup} */ source)
 	};
 }
 
-/** @returns {MediaStats} */
-function getStatsFromOutgoingSource(/** @type {Native.RTPOutgoingSource} */ source) 
+function getStatsFromOutgoingSource(source: Native.RTPOutgoingSource): OutgoingMediaStats
 {
 	return {
 		rtt			: source.rtt,
@@ -110,49 +142,54 @@ function getStatsFromOutgoingSource(/** @type {Native.RTPOutgoingSource} */ sour
 	};
 }
 
-/**
- * @typedef {Object} OutgoingStreamTrackEvents
- * @property {(self: OutgoingStreamTrack, stats: TrackStats) => void} stopped
- * @property {(muted: boolean) => void} muted
- * @property {(bitrate: number, self: OutgoingStreamTrack) => void} remb
- */
+/** Outgoing Stream Track Events */
+export interface OutgoingStreamTrackEvents {
+    stopped: (self: OutgoingStreamTrack, stats: OutgoingTrackStats) => void;
+    muted: (muted: boolean) => void;
+    remb: (bitrate: number, self: OutgoingStreamTrack) => void;
+}
 
 /**
  * Audio or Video track of a media stream sent to a remote peer
- * @extends {Emitter<OutgoingStreamTrackEvents>}
  */
-class OutgoingStreamTrack extends Emitter
+export class OutgoingStreamTrack extends Emitter<OutgoingStreamTrackEvents>
 {
-	/**
-	 * @ignore
-	 * @hideconstructor
-	 */
+	readonly id: string;
+    readonly mediaId: string;
+    readonly media: TrackType;
+    sender: SharedPointer.Proxy<Native.RTPSenderShared>;
+    source: SharedPointer.Proxy<Native.RTPOutgoingSourceGroupShared>;
+    
+    muted: boolean = false;
+    transponder: Transponder | null = null;
+    stats: OutgoingTrackStats;
+    stopped: boolean = false;
+    trackInfo: TrackInfo;
+
+	// native callback
+	private onremb: (bitrate: number) => void;
+
 	constructor(
-		/** @type {SemanticSDP.TrackType} */ media,
-		/** @type {string} */ id,
-		/** @type {string} */ mediaId,
-		/** @type {SharedPointer.Proxy<Native.RTPSenderShared>} */ sender,
-		/** @type {SharedPointer.Proxy<Native.RTPOutgoingSourceGroupShared>} */ source)
-	{
-		//Init emitter
+		media: TrackType, 
+        id: string, 
+        mediaId: string, 
+        sender: SharedPointer.Proxy<Native.RTPSenderShared>, 
+        source: SharedPointer.Proxy<Native.RTPOutgoingSourceGroupShared>
+	) {
 		super();
 
-		//Store track info
-		this.id		= id;
-		this.mediaId	= mediaId;
-		this.media	= media;
-		this.sender	= sender;
-		this.source	= source;
-		this.muted	= false;
-		this.transponder = /** @type {Transponder | null} */ (null);
-		
-		//Create info
-		this.trackInfo = new TrackInfo(media, id);
-		//If it has mediaId
-		if (this.mediaId)
-			//Set it
+		this.id = id;
+        this.mediaId = mediaId;
+        this.media = media;
+        this.sender = sender;
+        this.source = source;
+
+        this.trackInfo = new TrackInfo(media, id);
+
+		if (this.mediaId) {
 			this.trackInfo.setMediaId(this.mediaId);
-		
+		}
+
 		//Add ssrcs to track
 		this.trackInfo.addSSRC(source.media.ssrc);
 		source.rtx?.ssrc && this.trackInfo.addSSRC(source.rtx.ssrc);
@@ -166,15 +203,15 @@ class OutgoingStreamTrack extends Emitter
 		this.stats = getSourceStats(this.source);
 
 		//Native REMB event
-		this.onremb = (/** @type {number} */ bitrate) => {
-			this.emit("remb",bitrate,this);
-		};
+		this.onremb = (bitrate: number) => {
+            this.emit("remb", bitrate, this);
+        };
 	}
 	
 	/**
 	* Get track id as signaled on the SDP
 	*/
-	getId()
+	getId(): string
 	{
 		return this.id;
 	}
@@ -182,7 +219,7 @@ class OutgoingStreamTrack extends Emitter
 	/**
 	* Get track media id (mid)
 	*/
-	getMediaId()
+	getMediaId(): string
 	{
 		return this.mediaId;
 	}
@@ -190,7 +227,7 @@ class OutgoingStreamTrack extends Emitter
 	/**
 	* Get track media type
 	*/
-	getMedia()
+	getMedia(): TrackType
 	{
 		return this.media;
 	}
@@ -199,16 +236,16 @@ class OutgoingStreamTrack extends Emitter
 	 * Get track info object
 	 * @returns {TrackInfo} Track info
 	 */
-	getTrackInfo()
+	getTrackInfo(): TrackInfo
 	{
 		return this.trackInfo;
 	}
 	
 	/**
 	 * Get stats for all encodings 
-	 * @returns {TrackStats}
+	 * @returns {OutgoingTrackStats}
 	 */
-	getStats()
+	getStats(): OutgoingTrackStats
 	{
 		//Get current timestamp
 		const ts = Date.now();
@@ -231,9 +268,9 @@ class OutgoingStreamTrack extends Emitter
 
 	/**
 	 * Get stats for all encodings 
-	 * @returns {Promise<TrackStats>}
+	 * @returns {Promise<OutgoingTrackStats>}
 	 */
-	async getStatsAsync()
+	async getStatsAsync(): Promise<OutgoingTrackStats>
 	{
 		//Get current timestamp
 		const ts = Date.now();
@@ -257,9 +294,8 @@ class OutgoingStreamTrack extends Emitter
 
 	/**
 	 * Return ssrcs associated to this track
-	 * @returns {import("./Transport").SSRCs}
 	 */
-	getSSRCs()
+	getSSRCs(): SSRCs
 	{
 		//Return the sssrcs map
 		return {
@@ -273,7 +309,7 @@ class OutgoingStreamTrack extends Emitter
 	 * Check if the track is muted or not
 	 * @returns {boolean} muted
 	 */
-	isMuted()
+	isMuted(): boolean
 	{
 		return this.muted;
 	}
@@ -283,7 +319,7 @@ class OutgoingStreamTrack extends Emitter
 	 * This operation will not change the muted state of the stream this track belongs too.
 	 * @param {boolean} muting - if we want to mute or unmute
 	 */
-	mute(muting) 
+	mute(muting: boolean): void
 	{
 		//Mute transpoder always
 		this.transponder && this.transponder.mute(muting);
@@ -301,7 +337,7 @@ class OutgoingStreamTrack extends Emitter
 	 * Check if this outgoing stream track is alredy attached to an incoming stream track.
 	 * @returns {Boolean} true if attached, false otherwise
 	 */
-	isAttached()
+	isAttached(): boolean
 	{
 		return !!this.transponder?.getIncomingTrack();
 	}
@@ -310,7 +346,7 @@ class OutgoingStreamTrack extends Emitter
 	 * Create a transponder if not already attached or return current one.
 	 * @returns {Transponder} Track transponder object
 	 */
-	createTransponder()
+	createTransponder(): Transponder
 	{
 		//If we don't have transponder yet
 		if (!this.transponder)
@@ -321,7 +357,7 @@ class OutgoingStreamTrack extends Emitter
 				throw new Error("Cannot create transponder, OutgoingStreamTrack is already stopped");
 
 			//Create native transponder object
-			const transponder = SharedPointer(new Native.RTPStreamTransponderFacadeShared(this.source,this.sender,this));
+			const transponder = SharedPointer.SharedPointer(new Native.RTPStreamTransponderFacadeShared(this.source,this.sender,this));
 
 			//Store transponder wrapper
 			this.transponder = new Transponder(transponder, this.media);
@@ -341,7 +377,7 @@ class OutgoingStreamTrack extends Emitter
 		return this.transponder;
 	}
 
-	forcePlayoutDelay(/** @type {number} */ minDelay, /** @type {number} */ maxDelay)
+	forcePlayoutDelay(minDelay: number, maxDelay: number): void
 	{
 		this.source.SetForcedPlayoutDelay(minDelay, maxDelay);
 	}
@@ -350,12 +386,16 @@ class OutgoingStreamTrack extends Emitter
 	/**
 	 * Listen media from the incoming stream track and send it to the remote peer of the associated transport.
 	 * This will stop any previous transponder created by a previous attach.
-	 * @param {import("./IncomingStreamTrack")} incomingStreamTrack - The incoming stream to listen media for
-	 * @param {Transponder.LayerSelection} [layers]			- Layer selection info
+	 * @param {IncomingStreamTrack} incomingStreamTrack - The incoming stream to listen media for
+	 * @param {LayerSelection} [layers]			- Layer selection info
 	 * @param {Boolean} [smooth]					- Wait until next valid frame before switching to the new encoding
 	 * @returns {Transponder} Track transponder object
 	 */
-	attachTo(incomingStreamTrack, layers, smooth)
+	attachTo(
+        incomingStreamTrack: IncomingStreamTrack, 
+        layers?: LayerSelection, 
+        smooth?: boolean
+    ): Transponder
 	{
 		//If we don't have transponder yet
 		if (!this.transponder)
@@ -373,7 +413,7 @@ class OutgoingStreamTrack extends Emitter
 	 * Stop forwarding any previous attached track.
 	 * This will set the transponder inconming track to null
 	 */
-	detach()
+	detach(): void
 	{
 		//If not attached
 		if (!this.transponder)
@@ -388,7 +428,7 @@ class OutgoingStreamTrack extends Emitter
 	 * Get attached transponder for this track
 	 * @returns {Transponder | null} Attached transponder or null if not attached
 	 */
-	getTransponder() 
+	getTransponder(): Transponder | null 
 	{
 		return this.transponder;
 	}
@@ -396,7 +436,7 @@ class OutgoingStreamTrack extends Emitter
 	/**
 	 * Removes the track from the outgoing stream and also detaches from any attached incoming track
 	 */
-	stop()
+	stop(): void
 	{
 		//Don't call it twice
 		if (this.stopped) return;
@@ -424,11 +464,8 @@ class OutgoingStreamTrack extends Emitter
 		super.stop();
 		
 		//Remove transport reference, so destructor is called on GC
-		//@ts-expect-error
-		this.source = null;
-		//@ts-expect-error
-		this.sender = null;
+		
+		(this.source as any) = null;
+        (this.sender as any) = null;
 	}
 }
-
-module.exports = OutgoingStreamTrack;

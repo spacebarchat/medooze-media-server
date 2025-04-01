@@ -1,44 +1,47 @@
-const Transport		= require("./Transport");
-const Emitter		= require("medooze-event-emitter");
-const LFSR		= require('lfsr');
-const { v4: uuidV4 }	= require("uuid");
+import {Transport} from "./Transport";
+import Emitter from "medooze-event-emitter";
+import LFSR from 'lfsr';
+import { v4 as uuidV4 } from "uuid";
+import {
+    SDPInfo,
+    Setup,
+    MediaInfo,
+    CandidateInfo,
+    DTLSInfo,
+    ICEInfo,
+    StreamInfo,
+    TrackInfo,
+    SourceGroupInfo,
+	Capabilities,
+} from "semantic-sdp";
+import {Endpoint, CreateTransportOptions} from "./Endpoint";
+import { OutgoingStream } from "./OutgoingStream";
 
-const SemanticSDP	= require("semantic-sdp");
-
-const {
-	SDPInfo,
-	Setup,
-	MediaInfo,
-	CandidateInfo,
-	DTLSInfo,
-	ICEInfo,
-	StreamInfo,
-	TrackInfo,
-	SourceGroupInfo,
-} = require("semantic-sdp");
-
-/**
- * @typedef {Object} PeerConnectionServerEvents
- * @property {(self: PeerConnectionServer) => void} stopped
- * @property {(transport: Transport) => void} transport New managed transport has been created by a remote peer connection client
- */
+// Event types for PeerConnectionServer
+interface PeerConnectionServerEvents {
+    stopped: (self: PeerConnectionServer) => void;
+	/** New managed transport has been created by a remote peer connection client */
+    transport: (transport: Transport) => void;
+}
 
 /**
  * Manager of remote peer connecion clients
- * @extends {Emitter<PeerConnectionServerEvents>}
  */
-class PeerConnectionServer extends Emitter
+export class PeerConnectionServer extends Emitter<PeerConnectionServerEvents>
 {
-	/**
-	 * @ignore
-	 * @hideconstructor
-	 * private constructor
-	 */
+	count: number;
+    endpoint: Endpoint;
+    capabilities: Capabilities;
+    tm: any;
+    transports: Set<Transport>;
+    ns: any; // Namespace type from transport media manager
+
 	constructor(
-		/** @type {import("./Endpoint")} */ endpoint,
-		/** @type {any} */ tm,
-		/** @type {SemanticSDP.Capabilities} */ capabilities,
-		/** @type {import("./Endpoint").CreateTransportOptions} */ options)
+		endpoint: Endpoint, 
+        tm: any, 
+        capabilities: Capabilities, 
+        options: CreateTransportOptions
+	)
 	{
 		//Init emitter
 		super();
@@ -50,13 +53,16 @@ class PeerConnectionServer extends Emitter
 		this.tm = tm;
 		
 		//The created transports
-		this.transports = /** @type {Set<Transport>} */ (new Set());
+		this.transports = new Set<Transport>();
 		
 		//Create our namespace
 		this.ns = tm.namespace("medooze::pc");
+
+		// bind `this` since this function will be called by event handler
+		this.onEndpointStopped = this.onEndpointStopped.bind(this)
 		
 		//LIsten for creation events
-		this.ns.on("cmd",(cmd)=>{
+		this.ns.on("cmd",(cmd: any)=>{
 			//Get command nme
 			switch(cmd.name) 
 			{
@@ -64,7 +70,7 @@ class PeerConnectionServer extends Emitter
 					//Process the sdp
 					var offer = SDPInfo.expand(cmd.data);
 					//Create an DTLS ICE transport in that enpoint
-					const transport = this.endpoint.createTransport(offer, null, options);
+					const transport = this.endpoint.createTransport(offer, undefined, options);
 					
 					//Set RTP remote properties
 					transport.setRemoteProperties(offer);
@@ -101,7 +107,8 @@ class PeerConnectionServer extends Emitter
 								trackId	: track.getId()
 							});
 						});
-					}).on("outgoingstream",(stream)=>{
+						//@ts-expect-error todo: figure out what this event is for and why its here
+					}).on("outgoingstream",(stream: OutgoingStream)=>{
 						//For each stream
 						for (const track of stream.getTracks())
 						{
@@ -133,7 +140,7 @@ class PeerConnectionServer extends Emitter
 					this.transports.add(transport);
 					
 					//Listen remote events
-					pcns.on("event",(event)=>{
+					pcns.on("event",(event: any)=>{
 						//Get event data
 						const data = event.data;
 						//Depending on the event
@@ -151,7 +158,7 @@ class PeerConnectionServer extends Emitter
 									//Create empty one
 									stream = transport.createIncomingStream(new StreamInfo(streamId));
 								//Create incoming track
-								const track = stream.createTrack(trackInfo);
+								const track = stream.createTrack(trackInfo.media, trackInfo);
 								break;
 							}
 							case "removedtrack":
@@ -202,13 +209,17 @@ class PeerConnectionServer extends Emitter
 		});
 		
 		//Stop when endpoint stop
-		this.endpoint.once("stopped",this.onendpointstopped=()=>this.stop());
+		this.endpoint.once("stopped", this.onEndpointStopped);
+	}
+
+	private onEndpointStopped(): void {
+		this.stop() 
 	}
 	
 	/**
 	 * Stop the peerconnection server, will not stop the transport created by it
 	 */
-	stop()
+	stop(): void
 	{
 		//Chheck not stopped alrady
 		if (!this.endpoint)
@@ -216,7 +227,7 @@ class PeerConnectionServer extends Emitter
 			return;
 		
 		//Don't listen for stopped event
-		this.endpoint.off("stopped",this.onendpointstopped);
+		this.endpoint.off("stopped",this.onEndpointStopped);
 		
 		//For all transports
 		for (const transport of this.transports)
@@ -239,5 +250,3 @@ class PeerConnectionServer extends Emitter
 		this.endpoint = null;
 	}
 }
-
-module.exports = PeerConnectionServer;

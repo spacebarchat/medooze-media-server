@@ -1,0 +1,1 @@
+export const MaxLayerId = 0xFF;

@@ -1,36 +1,38 @@
-const Native		= require("./Native");
-const Emitter		= require("medooze-event-emitter");
-const Refresher		= require("./Refresher")
-const SharedPointer	= require("./SharedPointer");
-const IncomingStreamTrack = require("./IncomingStreamTrack");
+import * as Native from "./Native";
+import Emitter from "medooze-event-emitter";
+import {Refresher} from "./Refresher";
+import * as SharedPointer from "./SharedPointer";
+import {IncomingStreamTrack} from "./IncomingStreamTrack";
 
-/** @typedef {"Audio" | "Video" | "Text" | "Unknown"} FrameType */
+export type FrameType = "Audio" | "Video" | "Text" | "Unknown";
 
-/**
- * @typedef {Object} Frame
- * @property {FrameType} type
- * @property {string} codec
- * @property {Uint8Array} buffer
- */
+export interface Frame {
+    type: FrameType;
+    codec: string;
+    buffer: Uint8Array;
+}
 
-/**
- * @typedef {Object} IncomingStreamTrackReaderEvents
- * @property {(self: IncomingStreamTrackReader) => void} stopped
- * @property {(frame: Frame, self: IncomingStreamTrackReader) => void} frame
- */
+interface IncomingStreamTrackReaderEvents {
+    stopped: (self: IncomingStreamTrackReader) => void;
+    frame: (frame: Frame, self: IncomingStreamTrackReader) => void;
+}
 
-/** @extends {Emitter<IncomingStreamTrackReaderEvents>} */
-class IncomingStreamTrackReader extends Emitter
+export class IncomingStreamTrackReader extends Emitter<IncomingStreamTrackReaderEvents>
 {
-	/**
-	 * @ignore
-	 * @hideconstructor
-	 * private constructor
-	 */
+	intraOnly: boolean;
+    minPeriod: number;
+    reader: SharedPointer.Proxy<Native.MediaFrameReaderShared>;
+    refresher?: Refresher;
+    attached: IncomingStreamTrack | null = null;
+    stopped: boolean = false;
+
+	// native callback
+	private onframe: (buffer: Uint8Array,type: FrameType,codec: string,) => void;
+
 	constructor(
-		/** @type {boolean} */ intraOnly,
-		/** @type {number} */ minPeriod,
-		/** @type {boolean} */ ondemand)
+		intraOnly: boolean,
+		minPeriod: number,
+		ondemand: boolean)
 	{
 		//Init emitter
 		super();
@@ -38,7 +40,7 @@ class IncomingStreamTrackReader extends Emitter
 		this.intraOnly = intraOnly;
 		this.minPeriod = minPeriod;
 		//Create decoder
-		this.reader = SharedPointer(new Native.MediaFrameReaderShared(this,intraOnly,minPeriod,!!ondemand));
+		this.reader = SharedPointer.SharedPointer(new Native.MediaFrameReaderShared(this,intraOnly,minPeriod,!!ondemand));
 
 		//Check if we need to create a refresher for requesting intra periodically
 		if (this.minPeriod>0)
@@ -53,16 +55,14 @@ class IncomingStreamTrackReader extends Emitter
 				this.reader.GrabNextFrame();
 			});
 
-		//Track listener
-		this.ontrackstopped = ()=>{
-			//Dettach
-			this.detach();
-		};
-		//Frame listener
+		// bind `this` since this method will be called from event handler
+		this.onTrackStopped = this.onTrackStopped.bind(this);
+
+		// Native callback Frame listener
 		this.onframe = (
-			/** @type {Uint8Array} */ buffer,
-			/** @type {FrameType} */ type,
-			/** @type {string} */ codec,
+			buffer: Uint8Array,
+			type: FrameType,
+			codec: string,
 		) => {
 			this.emit("frame", {buffer,type,codec}, this);
 			//Reset refresher interval
@@ -70,13 +70,19 @@ class IncomingStreamTrackReader extends Emitter
 		}
 	}
 
-	grabNextFrame()
+	/** Track listener */
+	private onTrackStopped() {
+		//Dettach
+		this.detach();
+	}
+
+	grabNextFrame(): void
 	{
 		//Signal reader to grab next one
 		this.reader.GrabNextFrame();
 	}
 
-	detach()
+	detach(): void
 	{
 		//If attached to a decoder
 		if (this.attached)
@@ -86,14 +92,14 @@ class IncomingStreamTrackReader extends Emitter
 			//remove frame listener
 			this.attached.depacketizer.RemoveMediaListener(this.reader.toMediaFrameListener());
 			//remove listener
-			this.attached.off("stopped",this.ontrackstopped);
+			this.attached.off("stopped",this.onTrackStopped);
 			
 		}
 		//Not attached
 		this.attached = null;
 	}
 	
-	attachTo(/** @type {IncomingStreamTrack | undefined} */ track)
+	attachTo(track?: IncomingStreamTrack): void
 	{
 		//Detach first
 		this.detach();
@@ -106,7 +112,7 @@ class IncomingStreamTrackReader extends Emitter
 			//Add frame listener
 			track.depacketizer.AddMediaListener(this.reader.toMediaFrameListener());
 			//Listen for events
-			track.once("stopped",this.ontrackstopped);
+			track.once("stopped",this.onTrackStopped);
 			//Keep attached object
 			this.attached = track;
 			//Do periodic refresh
@@ -138,5 +144,3 @@ class IncomingStreamTrackReader extends Emitter
 		this.reader = null;
 	}
 }
-
-module.exports = IncomingStreamTrackReader;

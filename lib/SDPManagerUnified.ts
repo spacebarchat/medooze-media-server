@@ -1,52 +1,62 @@
-const SDPManager	= require("./SDPManager");
+import {
+    SDPInfo,
+    Setup,
+    MediaInfo,
+    CandidateInfo,
+    DTLSInfo,
+    ICEInfo,
+    StreamInfo,
+    TrackInfo,
+    SourceGroupInfo,
+    Direction,
+	TrackType,
+	Capabilities,
+	MediaType,
+} from 'semantic-sdp';
 
-const SemanticSDP	= require("semantic-sdp");
+import {Endpoint} from './Endpoint';
+import {OutgoingStream} from './OutgoingStream';
+import {OutgoingStreamTrack} from './OutgoingStreamTrack';
+import {IncomingStream} from './IncomingStream';
+import {IncomingStreamTrack} from './IncomingStreamTrack';
+import { SDPManager } from './SDPManager';
 
-const {
-	SDPInfo,
-	Setup,
-	MediaInfo,
-	CandidateInfo,
-	DTLSInfo,
-	ICEInfo,
-	StreamInfo,
-	TrackInfo,
-	SourceGroupInfo,
-	Direction,
-} = require("semantic-sdp");
+interface Transceiver {
+    mid: string;
+    media: MediaType;
+    local: TransceiverLocal;
+    remote: TransceiverRemote;
+}
 
-/** @typedef {import("./Endpoint")} Endpoint */
-/** @typedef {import("./Transport")} Transport */
+interface TransceiverLocal {
+    streamId?: string;
+    stream?: OutgoingStream;
+    track?: OutgoingStreamTrack;
+    info?: MediaInfo;
+}
 
-/**
- * @typedef {Object} Transceiver
- * @property {String} mid
- * @property {SemanticSDP.TrackType} media
- * @property {TransceiverLocal} local
- * @property {TransceiverRemote} remote
- */
+interface TransceiverRemote {
+    streamId?: string;
+    stream?: IncomingStream;
+    track?: IncomingStreamTrack;
+    info?: MediaInfo;
+}
 
-/**
- * @typedef {Object} TransceiverLocal
- * @property {String} [streamId]
- * @property {import("./OutgoingStream")} [stream]
- * @property {import("./OutgoingStreamTrack")} [track]
- * @property {MediaInfo} [info]
- */
-
-/**
- * @typedef {Object} TransceiverRemote
- * @property {String} [streamId]
- * @property {import("./IncomingStream")} [stream]
- * @property {import("./IncomingStreamTrack")} [track]
- * @property {MediaInfo} [info]
- */
-
-class SDPManagerUnified extends SDPManager
+export class SDPManagerUnified extends SDPManager
 {
+	endpoint: Endpoint;
+    capabilities: Capabilities;
+    transceivers: Transceiver[];
+    pending: Set<{ stream: OutgoingStream; track: OutgoingStreamTrack }>;
+    removed: Set<OutgoingStreamTrack>;
+    renegotiationNeeded: boolean;
+    localInfo?: SDPInfo;
+    remoteInfo?: SDPInfo;
+	processing: boolean;
+
 	constructor(
-		/** @type {Endpoint} */ endpoint,
-		/** @type {SemanticSDP.Capabilities} */ capabilities)
+		endpoint: Endpoint,
+		capabilities: Capabilities)
 	{
 		//Init parent
 		super();
@@ -55,20 +65,20 @@ class SDPManagerUnified extends SDPManager
 		this.endpoint = endpoint;
 		this.capabilities = capabilities;
 		//The list of transceivers
-		this.transceivers = /** @type {Transceiver[]} */ ([]);
+		this.transceivers = [];
 		//The pending list of local tracks not assigned to transceivers
-		this.pending = /** @type {Set<{ stream: import("./OutgoingStream"), track: import("./OutgoingStreamTrack") }>} */ (new Set());
+		this.pending = new Set();
 		//Set of removed local tracks
-		this.removed = /** @type {Set<import("./OutgoingStreamTrack")>} */ (new Set());
+		this.removed = new Set();
 		
 		//Renegotiation needed flag
 		this.renegotiationNeeded = false;
-		
+		this.processing = false;
 	}
 	
 	
 	/** @override */
-	createLocalDescription()
+	createLocalDescription(): string
 	{
 		//If there is no local info
 		if (!this.localInfo)
@@ -80,20 +90,19 @@ class SDPManagerUnified extends SDPManager
 				candidates	: this.endpoint.getLocalCandidates()
 			});
 			//For each media capability
-			for (const media of /** @type {SemanticSDP.MediaType[]} */ (Object.keys(this.capabilities)))
+			for (const media of (Object.keys(this.capabilities)) as MediaType[])
 			{
 				//New mid
 				const mid = String(this.transceivers.length);
 				//Create new transceiver
-				/** @type {Transceiver} */
-				const transceiver = {
+				const transceiver: Transceiver = {
 					mid	: mid,
 					media	: media,
 					remote	: {},
 					local	: {}
 				};
 				//Create new local media info
-				const mediaInfo = transceiver.local.info = MediaInfo.create(media,this.capabilities[media]);
+				const mediaInfo = transceiver.local.info = MediaInfo.create(mid, media,this.capabilities[media]);
 				//Set mid
 				mediaInfo.setId(mid);
 				//Add to local info
@@ -209,7 +218,7 @@ class SDPManagerUnified extends SDPManager
 					//Receive only
 					mediaInfo.setDirection(Direction.SENDONLY);
 				//Get stream info
-				const id = transceiver.local.stream.getId();
+				const id = transceiver.local.stream!.getId();
 				let streamInfo = this.localInfo.getStream(id);
 				//If not present yet
 				if (!streamInfo)
@@ -258,7 +267,7 @@ class SDPManagerUnified extends SDPManager
 		return this.localInfo.toString();
 	}
 	
-	renegotiate() 
+	renegotiate(): void 
 	{
 		//Check if we already need to renegotiate
 		if (!this.renegotiationNeeded && (this.state === 'initial' || this.state === 'stable'))
@@ -270,13 +279,13 @@ class SDPManagerUnified extends SDPManager
 				//Clean flag
 				this.renegotiationNeeded = false;
 				//Emit event
-				this.emit("renegotiationneeded",this.transport);
+				this.emit("renegotiationneeded", this.transport!);
 			},0);
 		}
 	}
 	
 	/** @override */
-	processRemoteDescription(/** @type {string} */ sdp)
+	processRemoteDescription(sdp: string): string
 	{
 		//Parse sdp
 		this.remoteInfo = SDPInfo.parse(sdp);
@@ -307,7 +316,7 @@ class SDPManagerUnified extends SDPManager
 			this.transport.on("outgoingtrack",(track,stream)=>{
 				//Add to pending
 				this.pending.add({
-					stream : stream,
+					stream : stream!,
 					track  : track,
 				});
 
@@ -396,13 +405,13 @@ class SDPManagerUnified extends SDPManager
 					if (!stream)
 					{
 						//Create new one
-						stream = this.transport.createIncomingStream(streamInfo);
+						stream = this.transport.createIncomingStream(streamInfo!);
 						//Get the track
 						track = stream.getTrack(trackInfo.getId());
 					//If we don't have a track already
 					} else if (!track && trackInfo) {
 						//Create new trck on the stream
-						track = stream.createTrack(trackInfo);
+						track = stream.createTrack(trackInfo.media, trackInfo);
 					}
 					//Store track and stream info
 					transceiver.remote.streamId	= stream.getId();
@@ -449,7 +458,7 @@ class SDPManagerUnified extends SDPManager
 	}
 	
 	/** @override */
-	stop()
+	stop(): void
 	{
 		//Stop transport
 		if (this.transport)
@@ -464,5 +473,3 @@ class SDPManagerUnified extends SDPManager
 		this.endpoint = null;
 	}
 }
-
-module.exports = SDPManagerUnified;

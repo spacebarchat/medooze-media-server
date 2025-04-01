@@ -1,47 +1,42 @@
-const Native		= require("./Native");
-const Emitter		= require("medooze-event-emitter");
-const LayerInfo		= require("./LayerInfo");
-const SharedPointer	= require("./SharedPointer");
-const IncomingStreamTrack = require("./IncomingStreamTrack");
-const SemanticSDP	= require("semantic-sdp");
-const {
-	SDPInfo,
-	Setup,
-	MediaInfo,
-	CandidateInfo,
-	DTLSInfo,
-	ICEInfo,
-	StreamInfo,
-	TrackInfo,
-	TrackEncodingInfo,
-	SourceGroupInfo,
-} = require("semantic-sdp");
-
-/** @typedef {IncomingStreamTrack.Encoding} Encoding */
-/** @typedef {IncomingStreamTrack.Encoding} EncodingInfo */
+import * as Native from './Native';
+import Emitter from 'medooze-event-emitter';
+import * as SharedPointer from './SharedPointer';
+import {ActiveLayersInfo, Encoding, IncomingStreamTrack, IncomingStreamTrackEvents, IncomingTrackStats} from './IncomingStreamTrack';
+import { 
+  TrackInfo, 
+} from 'semantic-sdp';
+import { SSRCs } from './Transport';
+import { TrackType } from 'semantic-sdp/dist/TrackInfo';
 
 /**
  * Bundle multiple video track as if they were a single simulcast video track
  * @extends {Emitter<IncomingStreamTrack.IncomingStreamTrackEvents<IncomingStreamTrackSimulcastAdapter, Encoding>>}
  */
-class IncomingStreamTrackSimulcastAdapter extends Emitter
+export class IncomingStreamTrackSimulcastAdapter extends Emitter<IncomingStreamTrackEvents<IncomingStreamTrackSimulcastAdapter, Encoding>>
 {
-	/**
-	 * @ignore
-	 * @hideconstructor
-	 * private constructor
-	 */
+	public readonly id: string;
+	public readonly media: 'video';
+	public readonly mediaId: string;
+	public muted: boolean;
+	
+	counter: number;
+	trackInfo: TrackInfo;
+	encodings: Map<string, Encoding>;
+	encodingPerTrack: Map<IncomingStreamTrack, Map<string, Encoding>>;
+	depacketizer: SharedPointer.Proxy<Native.SimulcastMediaFrameListenerShared>;
+	stopped: boolean = false;
+
 	constructor(
-		/** @type {string} */ id,
-		/** @type {string} */ mediaId,
-		/** @type {Native.TimeService} */ timeService)
+		id: string,
+		mediaId: string,
+		timeService: Native.TimeService)
 	{
 		//Init emitter
 		super();
 
 		//Store track id
 		this.id = id;
-		this.media = /** @type {const} */ ("video");
+		this.media = "video";
 		this.mediaId = mediaId;
 		//Not muted
 		this.muted = false;
@@ -53,17 +48,20 @@ class IncomingStreamTrackSimulcastAdapter extends Emitter
 		this.trackInfo = new TrackInfo(this.media, id);
 	
 		//Create source maps
-		this.encodings = /** @type {Map<string, Encoding>} */ (new Map());
-		this.encodingPerTrack = /** @type {Map<IncomingStreamTrack, Map<string, Encoding>>} */ (new Map());
+		this.encodings = new Map();
+		this.encodingPerTrack = new Map();
 
 		//Create a simulcast frame listerner
-		this.depacketizer = SharedPointer(new Native.SimulcastMediaFrameListenerShared(timeService, 1, 0));
+		this.depacketizer = SharedPointer.SharedPointer(new Native.SimulcastMediaFrameListenerShared(timeService, 1, 0));
 		
-		//On stopped listener
-		this.onstopped = (/** @type {IncomingStreamTrack} */ incomingStreamTrack) => {
-			//Remove track
-			this.removeTrack(incomingStreamTrack);
-		};
+		// we have to bind `this` since this method will be called from event handler
+		this.onStopped = this.onStopped.bind(this)
+	}
+
+	/** On stopped listener */
+	private onStopped(incomingStreamTrack: IncomingStreamTrack) {
+		//Remove track
+		this.removeTrack(incomingStreamTrack);
 	}
 
 	/**
@@ -71,7 +69,7 @@ class IncomingStreamTrackSimulcastAdapter extends Emitter
 	 * @param {IncomingStreamTrack} incomingStreamTrack
 	 * @returns {Boolean}
 	 */
-	hasTrack(incomingStreamTrack)
+	hasTrack(incomingStreamTrack: IncomingStreamTrack): boolean
 	{
 		return this.encodingPerTrack.has(incomingStreamTrack);
 	}
@@ -81,7 +79,7 @@ class IncomingStreamTrackSimulcastAdapter extends Emitter
 	 * @param {String} encodingId				- Id used as base for encodings id
 	 * @param {IncomingStreamTrack} incomingStreamTrack	- Incoming video stream track
 	 */
-	addTrack(encodingId,incomingStreamTrack)
+	addTrack(encodingId: string,incomingStreamTrack: IncomingStreamTrack)
 	{
 		//Ensure that it is not  already on the 
 		if (this.encodingPerTrack.has(incomingStreamTrack))
@@ -107,10 +105,10 @@ class IncomingStreamTrackSimulcastAdapter extends Emitter
 			};
 
 			//check if we already have it
-			if (this.encodings.has(mirrored.id))
+			if (this.encodings.has(mirrored.id)) {
 				//Error
 				throw new Error("Cannot add track, ncoding id already present");
-
+			}
 			//Push new encoding
 			this.encodings.set(mirrored.id, mirrored);
 			//Store ids
@@ -124,14 +122,15 @@ class IncomingStreamTrackSimulcastAdapter extends Emitter
 		this.depacketizer.SetNumLayers(this.encodings.size);
 
 		//If we are already attached
-		if (this.isAttached())
+		if (this.isAttached()) {
 			//We have to signal as much times as counter
-			for (let i= 0; i<this.counter; ++i)
+			for (let i= 0; i<this.counter; ++i) {
 				//Signal original track is attached
 				incomingStreamTrack.attached();
-
+			}
+		}
 		//Set the stopped listener
-		incomingStreamTrack.on("stopped",this.onstopped);
+		incomingStreamTrack.on("stopped",this.onStopped);
 
 		//Add encodings to map
 		this.encodingPerTrack.set(incomingStreamTrack,encodings);
@@ -139,15 +138,16 @@ class IncomingStreamTrackSimulcastAdapter extends Emitter
 		//Emit pending encoding events (it is important to defer this until now,
 		//when the track is fully added and the new encodings we're emitting
 		//are presented in getActiveLayers().
-		for (const [id,encoding] of encodings)
+		for (const [id,encoding] of encodings) {
 			this.emit("encoding",this,encoding);
+		}
 	}
 
 	/**
 	 * Remove video track to the simulcast adapter
 	 * @param {IncomingStreamTrack} incomingStreamTrack	- Incoming video stream track
 	 */
-	removeTrack(incomingStreamTrack)
+	removeTrack(incomingStreamTrack: IncomingStreamTrack)
 	{
 		//Get the encodings
 		const encodings = this.encodingPerTrack.get(incomingStreamTrack);
@@ -171,29 +171,31 @@ class IncomingStreamTrackSimulcastAdapter extends Emitter
 		this.encodingPerTrack.delete(incomingStreamTrack);
 
 		//Remove stop listeners
-		incomingStreamTrack.off("stopped",this.onstopped);
+		incomingStreamTrack.off("stopped",this.onStopped);
 
 		//If we are already attached
-		if (this.isAttached())
+		if (this.isAttached()) {
 			//We have to signal as much times as counter
-			for (let i= 0; i<this.counter; ++i)
+			for (let i= 0; i<this.counter; ++i) {
 				//Signal original track is dettached
 				incomingStreamTrack.detached();
-
+			}
+		}
 		//Emit pending encodingremoved events (it is important to defer this
 		//until now, when the track is fully removed and the old encodings
 		//we're emitting are no longer presented in getActiveLayers().
-		for (const [id,encoding] of encodings)
+		for (const [id,encoding] of encodings) {
 			this.emit("encodingremoved", this, encoding);
+		}
 	}
 
 	/**
 	 * Get stats for all encodings from the original track
 	 * @returns {IncomingStreamTrack.TrackStats}
 	 */
-	getStats()
+	getStats(): IncomingTrackStats
 	{
-		const stats = /** @type {IncomingStreamTrack.TrackStats} */ ({});
+		const stats: IncomingTrackStats = {};
 		
 		//For each track
 		for (const [track,encodings] of this.encodingPerTrack)
@@ -205,7 +207,10 @@ class IncomingStreamTrackSimulcastAdapter extends Emitter
 			for (const [id,stat] of Object.entries(trackStats))
 			{
 				//Get the mirrored encoding for the id
-				const encoding = /** @type {Encoding} */ (encodings.get(id));
+				const encoding = encodings.get(id);
+
+				if(!encoding) continue;
+
 				//Add stat with mirrored id
 				stats[encoding.id] = stat;
 			}
@@ -221,9 +226,9 @@ class IncomingStreamTrackSimulcastAdapter extends Emitter
 	 * Get stats for all encodings from the original track
 	 * @returns {Promise<IncomingStreamTrack.TrackStats>}
 	 */
-	async getStatsAsync()
+	async getStatsAsync(): Promise<IncomingTrackStats>
 	{
-		const stats = /** @type {IncomingStreamTrack.TrackStats} */ ({});
+		const stats: IncomingTrackStats = {};
 		
 		//For each track
 		for (const [track,encodings] of this.encodingPerTrack)
@@ -235,7 +240,10 @@ class IncomingStreamTrackSimulcastAdapter extends Emitter
 			for (const [id,stat] of Object.entries(trackStats))
 			{
 				//Get the mirrored encoding for the id
-				const encoding = /** @type {Encoding} */ (encodings.get(id));
+				const encoding = encodings.get(id);
+
+				if(!encoding) continue;
+
 				//Add stat with mirrored id
 				stats[encoding.id] = stat;
 			}
@@ -250,7 +258,7 @@ class IncomingStreamTrackSimulcastAdapter extends Emitter
 	/**
 	 * Get active encodings and layers ordered by bitrate of the original track
 	 */
-	getActiveLayers()
+	getActiveLayers(): ActiveLayersInfo
 	{
 		//Get track stats
 		const stats = this.getStats();
@@ -262,7 +270,7 @@ class IncomingStreamTrackSimulcastAdapter extends Emitter
 	/**
 	 * Get active encodings and layers ordered by bitrate of the original track
 	 */
-	async getActiveLayersAsync()
+	async getActiveLayersAsync(): Promise<ActiveLayersInfo>
 	{
 		//Get track stats
 		const stats = await this.getStatsAsync();
@@ -274,7 +282,7 @@ class IncomingStreamTrackSimulcastAdapter extends Emitter
 	/**
 	* Get track id as signaled on the SDP
 	*/
-	getId()
+	getId(): string
 	{
 		return this.id;
 	}
@@ -282,7 +290,7 @@ class IncomingStreamTrackSimulcastAdapter extends Emitter
 	/**
 	* Get track media id (mid)
 	*/
-	getMediaId()
+	getMediaId(): string
 	{
 		return this.mediaId;
 	}
@@ -290,7 +298,7 @@ class IncomingStreamTrackSimulcastAdapter extends Emitter
 	/**
 	 * Get track info object
 	 */
-	getTrackInfo()
+	getTrackInfo(): TrackInfo
 	{
 		return this.trackInfo;
 	}
@@ -301,7 +309,7 @@ class IncomingStreamTrackSimulcastAdapter extends Emitter
 	 */
 	getSSRCs()
 	{
-		const ssrcs = /** @type {{ [encodingId: string]: import("./Transport").SSRCs }} */ ({});
+		const ssrcs: { [encodingId: string]: SSRCs } =  {};
 		
 		//For each track
 		for (const [track,encodings] of this.encodingPerTrack)
@@ -313,7 +321,10 @@ class IncomingStreamTrackSimulcastAdapter extends Emitter
 			for (const [id,encodingSSRCs] of Object.entries(trackSSRCs))
 			{
 				//Get the mirrored encoding for the id
-				const encoding = /** @type {Encoding} */ (encodings.get(id));
+				const encoding = encodings.get(id);
+
+				if(!encoding) continue;
+
 				//Add stat with mirrored id
 				ssrcs[encoding.id] = encodingSSRCs;
 			}
@@ -326,7 +337,7 @@ class IncomingStreamTrackSimulcastAdapter extends Emitter
 	/**
 	* Get track media type
 	*/
-	getMedia()
+	getMedia(): TrackType
 	{
 		return this.media;
 	}
@@ -336,7 +347,7 @@ class IncomingStreamTrackSimulcastAdapter extends Emitter
 	 * Internal use, you'd beter know what you are doing before calling this method
 	 * @returns {Array<Encoding>} - encodings 
 	 **/
-	getEncodings()
+	getEncodings(): Encoding[]
 	{
 		return Array.from(this.encodings.values());
 	}
@@ -347,7 +358,7 @@ class IncomingStreamTrackSimulcastAdapter extends Emitter
 	 * @param {String} encodingId	- encoding Id,
 	 * @returns {Encoding | undefined}
 	 **/
-	getEncoding(encodingId)
+	getEncoding(encodingId: string): Encoding | undefined
 	{
 		return this.encodings.get(encodingId);
 	}
@@ -357,7 +368,7 @@ class IncomingStreamTrackSimulcastAdapter extends Emitter
 	 * Internal use, you'd beter know what you are doing before calling this method
 	 * @returns {Encoding}
 	 **/
-	getDefaultEncoding()
+	getDefaultEncoding(): Encoding
 	{
 		return [...this.encodings.values()][0];
 	}
@@ -366,7 +377,7 @@ class IncomingStreamTrackSimulcastAdapter extends Emitter
 	 * Check if the track is muted or not
 	 * @returns {boolean} muted
 	 */
-	isMuted()
+	isMuted(): boolean
 	{
 		return this.muted;
 	}
@@ -375,7 +386,7 @@ class IncomingStreamTrackSimulcastAdapter extends Emitter
 	 * Mute/Unmute track
 	 * @param {boolean} muting - if we want to mute or unmute
 	 */
-	mute(muting) 
+	mute(muting: boolean): void 
 	{
 		//For each track
 		for (const [track,encodings] of this.encodingPerTrack)
@@ -394,7 +405,7 @@ class IncomingStreamTrackSimulcastAdapter extends Emitter
 	/**
 	 * Return if the track is attached or not
 	 */
-	isAttached()
+	isAttached(): boolean
 	{
 		return this.counter>0;
 	}
@@ -404,7 +415,7 @@ class IncomingStreamTrackSimulcastAdapter extends Emitter
 	 * Signal that this track has been attached.
 	 * Internal use, you'd beter know what you are doing before calling this method
 	 */
-	attached() 
+	attached(): void
 	{
 		//If we are already stopped
 		if (this.stopped) return;
@@ -428,37 +439,40 @@ class IncomingStreamTrackSimulcastAdapter extends Emitter
 	refresh()
 	{
 		//For each source
-		for (let encoding of this.encodings.values())
+		for (let encoding of this.encodings.values()) {
 			//Request an iframe on main ssrc
 			encoding.receiver.SendPLI(encoding.source.GetMediaSSRC());
+		}
 	}
 	
 	/**
 	 * Signal that this track has been detached.
 	 * Internal use, you'd beter know what you are doing before calling this method
 	 */
-	detached()
+	detached(): void
 	{
 		//If we are already stopped
 		if (this.stopped) return;
 
 		//For each track
-		for (const [track,encodings] of this.encodingPerTrack)
+		for (const [track,encodings] of this.encodingPerTrack) {
 			//Signal original track is deattached
 			track.detached();
+		}
 
 		//Decrease attach counter
 		this.counter--;
 		
 		//If it is the last
-		if (this.counter===0)
+		if (this.counter===0) {
 			this.emit("detached",this);
+		}
 	}
 	
 	/**
 	 * Removes the track from the incoming stream and also detaches any attached outgoing track or recorder
 	 */
-	stop()
+	stop(): void
 	{
 		//Don't call it twice
 		if (this.stopped) return;
@@ -470,17 +484,20 @@ class IncomingStreamTrackSimulcastAdapter extends Emitter
 		for (const [track,encodings] of this.encodingPerTrack)
 		{
 			//Remove all mirrored encoding ids
-			for (const [id,encoding] of encodings)
+			for (const [id,encoding] of encodings) {
 				//Detach the simulcast depacketizer to the source media producer
 				this.depacketizer.Detach(encoding.depacketizer.toMediaFrameProducer());
+			}
 			//Remove stop listeners
-			track.off("stopped",this.onstopped);
+			track.off("stopped",this.onStopped);
 			//If we are already attached
-			if (this.isAttached())
+			if (this.isAttached()) {
 				//We have to signal as much times as counter
-				for (let i= 0; i<this.counter; ++i)
+				for (let i= 0; i<this.counter; ++i) {
 					//Signal original track is dettached
 					track.detached();
+				}
+			}
 		}
 
 		//Clear encoding maps
@@ -499,5 +516,3 @@ class IncomingStreamTrackSimulcastAdapter extends Emitter
 	}
 
 }
-
-module.exports = IncomingStreamTrackSimulcastAdapter;

@@ -1,26 +1,21 @@
-const Emitter	= require("medooze-event-emitter");
-const StreamerSession	= require("./StreamerSession");
-const { MediaInfo } = require("semantic-sdp");
+import Emitter from "medooze-event-emitter";
+import {StreamerSession, StreamerSessionOptions} from "./StreamerSession";
+import { MediaInfo } from "semantic-sdp";
 
-/**
- * @typedef {Object} StreamerEvents
- * @property {(self: Streamer) => void} stopped
- */
+interface StreamerEvents {
+    stopped: (self: Streamer) => void;
+}
 
 /**
  * An streamer allows to send and receive plain RTP over udp sockets.
  * This allows both to bridge legacy enpoints or integrate streaming/broadcasting services.
- * @extends {Emitter<StreamerEvents>}
  */
-class Streamer extends Emitter
+export class Streamer extends Emitter<StreamerEvents>
 {
-	/**
-	 * @ignore
-	 * @hideconstructor
-	 * @param {string} [ip]
-	 * private constructor
-	 */
-	constructor(ip)
+	ip?: string;
+    sessions: Set<StreamerSession>;
+
+	constructor(ip?: string)
 	{
 		//Init emitter
 		super();
@@ -28,8 +23,7 @@ class Streamer extends Emitter
 		//Store ip address of the endpoint
 		this.ip = ip;
 		//Sessions set
-		/** @type {Set<StreamerSession>} */
-		this.sessions = new Set();
+		this.sessions = new Set<StreamerSession>();
 	}
 	
 	/**
@@ -38,7 +32,7 @@ class Streamer extends Emitter
 	 * @param {StreamerSession.StreamerSessionOptions} [params] - Network parameters
 	 * @returns {StreamerSession} The new streaming session
 	 */
-	createSession(media,params)
+	createSession(media: MediaInfo, params?: StreamerSessionOptions): StreamerSession
 	{
 		//Create session
 		const session = new StreamerSession(media,params);
@@ -58,12 +52,13 @@ class Streamer extends Emitter
 	/**
 	 * Stop all streaming sessions and frees resources
 	 */
-	stop() 
+	stop(): void 
 	{
 		//Stop all sessions
-		for (let session of this.sessions.values())
+		for (let session of this.sessions.values()) {
 			//stop
 			session.stop();
+		}
 
 		this.emit("stopped",this);
 
@@ -74,5 +69,3 @@ class Streamer extends Emitter
 		this.sessions.clear();
 	}
 }
-
-module.exports = Streamer;	

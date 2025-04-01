@@ -1,21 +1,16 @@
-const Native			= require("./Native");
-const SharedPointer		= require("./SharedPointer");
-const Emitter		= require("medooze-event-emitter");
-const SemanticSDP		= require("semantic-sdp");
-const OutgoingStreamTrack	= require("./OutgoingStreamTrack");
-const Transponder		= require("./Transponder");
-const { v4: uuidV4 }		= require("uuid");
-
-const {
-	SDPInfo,
-	Setup,
-	MediaInfo,
-	CandidateInfo,
-	DTLSInfo,
-	ICEInfo,
-	StreamInfo,
-	TrackInfo,
-} = require("semantic-sdp");
+import Emitter from 'medooze-event-emitter';
+import * as Native from './Native';
+import * as SharedPointer from './SharedPointer';
+import { v4 as uuidV4 } from 'uuid';
+import {
+    StreamInfo,
+    TrackInfo,
+    TrackType
+} from 'semantic-sdp';
+import {OutgoingStreamTrack, OutgoingTrackStats} from './OutgoingStreamTrack';
+import {LayerSelection, Transponder} from './Transponder';
+import {Transport} from './Transport';
+import {IncomingStream} from './IncomingStream';
 
 /**
  * @typedef {Object} OutgoingStreamEvents
@@ -24,55 +19,50 @@ const {
  * @property {(muted: boolean) => void} muted
  */
 
+export interface OutgoingStreamEvents {
+    stopped: (self: OutgoingStream, stats: ReturnType<OutgoingStream['getStats']>) => void;
+	/** track was created */
+    track: (track: OutgoingStreamTrack) => void;
+    muted: (muted: boolean) => void;
+}
+
 /**
  * The incoming streams represent the media stream sent to a remote peer.
- * @extends {Emitter<OutgoingStreamEvents>}
  */
-class OutgoingStream extends Emitter
+export class OutgoingStream extends Emitter<OutgoingStreamEvents>
 {
-	/**
-	 * @ignore
-	 * @hideconstructor
-	 * private constructor
-	 */
-	constructor(
-		/** @type {string} */ id,
-		/** @type {import("./Transport")} */ transport,
-	)
-	{
-		//Init emitter
-		super();
+	id: string;
+    muted: boolean = false;
+    transport: Transport;
+    info: StreamInfo;
+    tracks: Map<string, OutgoingStreamTrack>;
+    stopped?: boolean;
 
-		//Store id
-		this.id		= id;
-		this.muted	= false;
-
-		//Store transport
-		this.transport = transport
-
-		//Create stream info
-		this.info = new StreamInfo(id);
-		
-		//Store sources
-		this.tracks = /** @type {Map<string, OutgoingStreamTrack>} */ (new Map());
-	}
+	constructor(id: string, transport: Transport) {
+        super();
+        this.id = id;
+        this.transport = transport;
+        this.info = new StreamInfo(id);
+        this.tracks = new Map<string, OutgoingStreamTrack>();
+    }
 	
 	/**
 	 * Get statistics for all tracks in the stream
 	 * 
 	 * See {@link OutgoingStreamTrack.getStats} for information about the stats returned by each track.
 	 * 
-	 * @returns {{ [trackId: string]: OutgoingStreamTrack.TrackStats }}
+	 * @returns {{ [trackId: string]: OutgoingTrackStats }}
 	 */
-	getStats() 
+	getStats() : { [trackId: string]: OutgoingTrackStats }
 	{
-		const stats = /** @type {{ [trackId: string]: OutgoingStreamTrack.TrackStats }} */ ({});
+		const stats: { [trackId: string]: OutgoingTrackStats } = {};
 		
 		//for each track
-		for (let track of this.tracks.values())
+		for (let track of this.tracks.values()) {
 			//Append stats
 			stats[track.getId()] = track.getStats();
-		
+		}
+
 		return stats;
 	}
 
@@ -83,10 +73,10 @@ class OutgoingStream extends Emitter
 	 * 
 	 * @returns {Promise<{ [trackId: string]: OutgoingStreamTrack.TrackStats }>}
 	 */
-	async getStatsAsync() 
+	async getStatsAsync(): Promise<{ [trackId: string]: OutgoingTrackStats }> 
 	{
 		// construct a list of promises for each [track ID, track stats] entry
-		const promises = this.getTracks().map(async track => /** @type {const} */ (
+		const promises = this.getTracks().map(async track => (
 			[track.getId(), await track.getStatsAsync()] ));
 
 		// wait for all stats to arrive, and then assemble the object from the entries
@@ -97,7 +87,7 @@ class OutgoingStream extends Emitter
 	 * Check if the stream is muted or not
 	 * @returns {boolean} muted
 	 */
-	isMuted()
+	isMuted(): boolean
 	{
 		return this.muted;
 	}
@@ -106,13 +96,14 @@ class OutgoingStream extends Emitter
 	 * Mute/Unmute this stream and all the tracks in it
 	 * @param {boolean} muting - if we want to mute or unmute
 	 */
-	mute(muting) 
+	mute(muting: boolean): void
 	{
 		//For each track
-		for (let track of this.tracks.values())
+		for (let track of this.tracks.values()) {
 			//Mute track
 			track.mute(muting);
-		
+		}
+
 		//If we are different
 		if (this.muted!==muting)
 		{
@@ -129,13 +120,13 @@ class OutgoingStream extends Emitter
 	 * @param {Boolean} [smooth]				- Wait until next valid frame before switching to the new encoding
 	 * @returns {Transponder[]} Track transponders array
 	 */
-	attachTo(incomingStream, layers, smooth)
+	attachTo(incomingStream: IncomingStream, layers?: LayerSelection, smooth?: boolean): Transponder[]
 	{
 		//Dettach
 		this.detach();
 		
 		//The transponders
-		const transponders = /** @type {Transponder[]} */ ([]);
+		const transponders: Transponder[] = [];
 		
 		//Get all of our audio streams
 		const audio = this.getAudioTracks();
@@ -172,18 +163,19 @@ class OutgoingStream extends Emitter
 	/**
 	 * Stop listening for media 
 	 */
-	detach()
+	detach(): void
 	{
 		//For each track
-		for (let track of this.tracks.values())
+		for (let track of this.tracks.values()) {
 			//Detach it
 			track.detach();
+		}
 	}
 	/**
 	 * Get the stream info object for signaling the ssrcs and stream info on the SDP to the remote peer
 	 * @returns {StreamInfo} The stream info object
 	 */
-	getStreamInfo()
+	getStreamInfo(): StreamInfo
 	{
 		return this.info;
 	}
@@ -192,7 +184,7 @@ class OutgoingStream extends Emitter
 	 * The media stream id as announced on the SDP
 	 * @returns {String}
 	 */
-	getId() 
+	getId(): string 
 	{
 		return this.id;
 	}
@@ -202,7 +194,7 @@ class OutgoingStream extends Emitter
 	 * @param {SemanticSDP.TrackType} [type]	- The media type (Optional)
 	 * @returns {Array<OutgoingStreamTrack>}	- Array of tracks
 	 */
-	getTracks(type) 
+	getTracks(type?: TrackType) 
 	{
 		//Create array from tracks
 		const tracks = Array.from(this.tracks.values());
@@ -215,7 +207,7 @@ class OutgoingStream extends Emitter
 	 * @param {String} trackId	- The track id
 	 * @returns {OutgoingStreamTrack | undefined}	- requested track or null
 	 */
-	getTrack(trackId) 
+	getTrack(trackId: string): OutgoingStreamTrack | undefined
 	{
 		//get it
 		return this.tracks.get(trackId);
@@ -225,12 +217,12 @@ class OutgoingStream extends Emitter
 	 * Get an array of the media stream audio tracks
 	 * @returns {OutgoingStreamTrack[]}	- Array of tracks
 	 */
-	getAudioTracks() 
+	getAudioTracks(): OutgoingStreamTrack[] 
 	{
-		var audio = [];
+		const audio: OutgoingStreamTrack[] = [];
 		
 		//For each track
-		for (let track of this.tracks.values())
+		for (const track of this.tracks.values())
 			//If it is an video track
 			if(track.getMedia().toLowerCase()==="audio")
 				//Append to tracks
@@ -243,12 +235,12 @@ class OutgoingStream extends Emitter
 	 * Get an array of the media stream video tracks
 	 * @returns {OutgoingStreamTrack[]}	- Array of tracks
 	 */
-	getVideoTracks() 
+	getVideoTracks(): OutgoingStreamTrack[] 
 	{
-		var video = [];
+		const video: OutgoingStreamTrack[] = [];
 		
 		//For each track
-		for (let track of this.tracks.values())
+		for (const track of this.tracks.values())
 			//If it is an video track
 			if(track.getMedia().toLowerCase()==="video")
 				//Append to tracks
@@ -262,7 +254,7 @@ class OutgoingStream extends Emitter
 	 *  
 	 * @param {OutgoingStreamTrack} track
 	 */
-	addTrack(track)
+	addTrack(track: OutgoingStreamTrack): void
 	{
 		//Ensure we don't have that id alread
 		if (this.tracks.has(track.getId()))
@@ -289,13 +281,13 @@ class OutgoingStream extends Emitter
 	 * @param {SemanticSDP.TrackInfoLike} params Params plain object or TrackInfo object
 	 * @returns {OutgoingStreamTrack}
 	 */
-	createTrack(media, params)
+	createTrack(media: TrackType, params: TrackInfo): OutgoingStreamTrack
 	{
 		//Delegate to transport
 		return this.transport.createOutgoingStreamTrack(media, params, this);
 	}
 	
-	stop()
+	stop(): void
 	{
 		//Don't call it twice
 		if (this.stopped) return;
@@ -320,8 +312,6 @@ class OutgoingStream extends Emitter
 		super.stop();
 		
 		//Remove transport reference, so destructor is called on GC
-		/** @type {any} */ (this.transport) = null;
+		(this.transport as any) = null;
 	}
 };
-
-module.exports = OutgoingStream;

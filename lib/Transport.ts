@@ -1,101 +1,120 @@
-const Native		= require("./Native");
-const Emitter		= require("medooze-event-emitter");
-const SharedPointer	= require("./SharedPointer");
-const NetworkUtils	= require("./NetworkUtils");
-const LFSR		= require('lfsr');
-const { v4: uuidV4 }	= require("uuid");
+import * as Native from "./Native";
+import Emitter from "medooze-event-emitter";
+import * as SharedPointer from "./SharedPointer";
+import * as NetworkUtils from "./NetworkUtils";
+import LFSR from "lfsr";
+import { v4 as uuidV4 } from "uuid";
 
-const SemanticSDP	= require("semantic-sdp");
-const IncomingStream	= require("./IncomingStream");
-const OutgoingStream	= require("./OutgoingStream");
+import SemanticSDP, {
+    SDPInfo,
+    Setup,
+    MediaInfo,
+    CandidateInfo,
+    DTLSInfo,
+    ICEInfo,
+    StreamInfo,
+    TrackInfo,
+    SourceGroupInfo,
+	TrackInfoLike,
+	ICEInfoLike,
+	TrackType,
+} from "semantic-sdp";
 
-const IncomingStreamTrack = require("./IncomingStreamTrack");
-const OutgoingStreamTrack = require("./OutgoingStreamTrack");
-
-const {
-	SDPInfo,
-	Setup,
-	MediaInfo,
-	CandidateInfo,
-	DTLSInfo,
-	ICEInfo,
-	StreamInfo,
-	TrackInfo,
-	SourceGroupInfo,
-} = require("semantic-sdp");
-
-const Utils		= require("./Utils");
-
-//@ts-expect-error
-const parseInt = /** @type {(x: number) => number} */ (global.parseInt);
+import * as Utils from "./Utils";
+import {IncomingStream } from "./IncomingStream";
+import {OutgoingStream} from "./OutgoingStream";
+import {IncomingStreamTrack, NativeSourceMap} from "./IncomingStreamTrack";
+import {OutgoingStreamTrack} from "./OutgoingStreamTrack";
+import * as Endpoint from "./Endpoint";
 
 let maxId = 0;
 
 const noop = function(){};
 
 /**
- * @typedef {"new" | "connecting" | "connected" | "closed" | "failed"} DTLSState
  * DTLS connection state as per the w3c spec
  */
+export type DTLSState = "new" | "connecting" | "connected" | "closed" | "failed";
 
-/**
- * @typedef {Object} TransportDumpOptions
- * @property {boolean} [incoming] Dump incoming RTP data [Default: true]
- * @property {boolean} [outgoing] Dump outgoing RTP data [Default: true]
- * @property {boolean} [rtcp] Dump rtcp RTP data [Default: true]
- * @property {boolean} [rtpHeadersOnly] Dump only rtp headers and first 16 bytes of payload for rtp packets [Default: false]
- * @property {boolean} [bwe] Dump bwe stats to a different file (.pcap->.csv) [Default: true]
- * @property {number} [bweFileSize] When dumping bwe stats to a file, if it grows over this size wrap it up and start a new file [Default: 0 (No limit)]
- */
+export interface TransportDumpOptions {
+	/** Dump incoming RTP data [Default: true] */
+    incoming?: boolean;
+	/** Dump outgoing RTP data [Default: true] */
+    outgoing?: boolean;
+	/** Dump rtcp RTP data [Default: true] */
+    rtcp?: boolean;
+	/** Dump only rtp headers and first 16 bytes of payload for rtp packets [Default: false] */
+    rtpHeadersOnly?: boolean;
+	/** Dump bwe stats to a different file (.pcap->.csv) [Default: true] */
+    bwe?: boolean;
+	/** When dumping bwe stats to a file, if it grows over this size wrap it up and start a new file [Default: 0 (No limit)] */
+    bweFileSize?: number;
+}
 
-/**
- * @typedef {Object} TransportStats
- * @property {number} senderSideEstimationBitrate Sender side estimation bitrate (if available)
- * @property {number} senderSideTargetBitrate
- * @property {ICEStats} [ice]
- */
+export interface TransportStats {
+	/** Sender side estimation bitrate (if available) */
+    senderSideEstimationBitrate: number;
+    senderSideTargetBitrate: number;
+    ice?: ICEStats;
+}
 
-/**
- * @typedef {Object} ICEStats ICE related stats
- * @property {number} requestsSent Number of ice requests sent
- * @property {number} requestsReceived Number of ice requests received
- * @property {number} responsesSent Number of ice responses sent
- * @property {number} responsesReceived Number of ice responses received
- */
+/** ICE related stats */
+export interface ICEStats {
+	/** Number of ice requests sent */
+    requestsSent: number;
+	/** Number of ice requests received */
+    requestsReceived: number;
+	/** Number of ice responses sent */
+    responsesSent: number;
+	/** Number of ice responses received */
+    responsesReceived: number;
+}
 
-/**
- * @typedef {Object} SSRCs
- * @property {number} media ssrc for the media track 
- * @property {number} [fec] ssrc for the fec track (only applicable to video tracks)
- * @property {number} [rtx] ssrc for the rtx track (only applicable to video tracks)
- */
+export interface SSRCs {
+	/** ssrc for the media track */
+    media: number;
+	/** ssrc for the fec track (only applicable to video tracks) */
+    fec?: number;
+	/** ssrc for the rtx track (only applicable to video tracks) */
+    rtx?: number;
+}
 
-/**
- * @typedef {Object} CreateStreamTrackOptions
- * @property {string} [id] Stream track id (default: "audio" for audio tracks, "video" for video tracks)
- * @property {string} [mediaId] Stream track media id (mid)
- * @property {string} [rid] Stream track rid
- * @property {SSRCs} [ssrcs] Override the generated ssrcs for this track
- */
+export interface CreateStreamTrackOptions {
+	/** Stream track id (default: "audio" for audio tracks, "video" for video tracks) */
+    id?: string;
+	/** Stream track media id (mid) */
+    mediaId?: string;
+	/** Stream track rid */
+    rid?: string;
+	/** Override the generated ssrcs for this track */
+    ssrcs?: SSRCs;
+}
 
-/**
- * @typedef {Object} CreateStreamOptions
- * @property {string} [id]
- * @property {Array<SemanticSDP.TrackInfoLike>|SemanticSDP.TrackInfoLike} [audio] Add audio track to the new stream
- * @property {Array<SemanticSDP.TrackInfoLike>|SemanticSDP.TrackInfoLike} [video] Add video track to the new stream
- */
+export interface CreateStreamOptions {
+    id?: string;
+	/** Add audio track to the new stream */
+    audio?: TrackInfoLike[] | TrackInfoLike;
+	/** Add video track to the new stream */
+    video?: TrackInfoLike[] | TrackInfoLike;
+}
 
-/**
- * @typedef {Object} TransportEvents
- * @property {(self: Transport) => void} stopped
- * @property {(self: Transport) => void} icetimeout ICE timeout. Fired when no ICE request ar received for 30 seconds.
- * @property {(state: DTLSState, self: Transport) => void} dtlsstate DTLS State change
- * @property {(candidate: CandidateInfo, self: Transport) => void} remoteicecandidate ICE remote candidate activation. This event fires when ICE candidate has correctly being checked out and we start using it for sending. (`candidate` is the ip and port of the remote ICE candidate that is in use by the transport)
- * @property {(targetBitrate: number, bandwidthEstimation: number, totalBitrate: Number, self: Transport) => void} targetbitrate Transport sender side estimation bitrate target update
- * @property {(track: IncomingStreamTrack, stream: IncomingStream | undefined) => void} incomingtrack New incoming stream track added to transport
- * @property {(track: OutgoingStreamTrack, stream: OutgoingStream | undefined) => void} outgoingtrack New outgoing stream track added to transport
- * @property {(ip: string, port: number, error: any) => void} rawtxdataerror Error occurred when calling {@link setCandidateRawTxData} on behalf of the user
- */
+interface TransportEvents {
+    stopped: (self: Transport) => void;
+	/** ICE timeout. Fired when no ICE request ar received for 30 seconds. */
+    icetimeout: (self: Transport) => void;
+	/** DTLS State change */
+    dtlsstate: (state: DTLSState, self: Transport) => void;
+	/** ICE remote candidate activation. This event fires when ICE candidate has correctly being checked out and we start using it for sending. (`candidate` is the ip and port of the remote ICE candidate that is in use by the transport) */
+    remoteicecandidate: (candidate: CandidateInfo, self: Transport) => void;
+	/** Transport sender side estimation bitrate target update */
+    targetbitrate: (targetBitrate: number, bandwidthEstimation: number, totalBitrate: number, self: Transport) => void;
+	/** New incoming stream track added to transport */
+    incomingtrack: (track: IncomingStreamTrack, stream?: IncomingStream) => void;
+	/** New outgoing stream track added to transport */
+    outgoingtrack: (track: OutgoingStreamTrack, stream?: OutgoingStream) => void;
+	/** Error occurred when calling {@link setCandidateRawTxData} on behalf of the user */
+    rawtxdataerror: (ip: string, port: number, error: any) => void;
+}
 
 /**
  * A transport represent a connection between a local ICE candidate and a remote set of ICE candidates over a single DTLS session.
@@ -104,21 +123,44 @@ const noop = function(){};
  * You must create the incoming streams as signaled on the remote SDP as any incoming RTP with an unknown ssrc will be ignored. 
  * When you create an outgoing stream, the transport will allocate internally the ssrcs for the different RTP streams in order to avoid collision. You will be able to retrieve that information from the streams object in order to be able to announce them on the SDP sent to the remote side.
  * In order to decide how to route your streams you must attach the outgoing streams from one transport to the incoming streams of other (or same) transport.
- * @extends {Emitter<TransportEvents>}
  */
-class Transport extends Emitter
+export class Transport extends Emitter<TransportEvents>
 {
-	/**
-	 * @ignore
-	 * @hideconstructor
-	 * private constructor
-	 */
+	readonly bundle: Endpoint.NativeBundle;
+    readonly remote: Endpoint.ParsedPeerInfo & { candidates: CandidateInfo[] };
+    local: Endpoint.ParsedPeerInfo;
+    username: string;
+    connection: SharedPointer.Proxy<Native.RTPBundleTransportConnectionShared>;
+    transport: SharedPointer.Proxy<Native.DTLSICETransportShared>;
+    dtlsState: DTLSState = "new";
+    listener: Native.DTLSICETransportListenerShared;
+    lfsr: LFSR;
+    stopped = false;
+    audioRTX = false;
+    dumping = false;
+    senderSideTargetBitrate?: number;
+    senderSideEstimationBitrate?: number;
+    bandwidthProbing?: boolean;
+    senderSideListener: Native.SenderSideEstimatorListener;
+
+    incomingStreams: Map<string, IncomingStream> = new Map();
+    outgoingStreams: Map<string, OutgoingStream> = new Map();
+    incomingStreamTracks: Map<string, IncomingStreamTrack> = new Map();
+    outgoingStreamTracks: Map<string, OutgoingStreamTrack> = new Map();
+
+	// native callbacks
+	onicetimeout: () => void;
+    ondtlsstate: (state: DTLSState) => void;
+    onremoteicecandidate: (ip: string, port: number, priority: number) => void;
+    onunsignaledincomingsourcegroup: (group: Native.RTPIncomingSourceGroupShared) => void;
+	ontargetbitrate: (targetBitrate: number, bandwidthEstimation: number, totalBitrate: number) => void;
+	
 	constructor(
-		/** @type {import("./Endpoint").NativeBundle} */ bundle,
-		/** @type {import("./Endpoint").ParsedPeerInfo} */ remote,
-		/** @type {import("./Endpoint").ParsedPeerInfo} */ local,
-		/** @type {import("./Endpoint").CreateTransportOptions} */ options)
-	{
+        bundle: Endpoint.NativeBundle,
+        remote: Endpoint.ParsedPeerInfo,
+        local: Endpoint.ParsedPeerInfo,
+        options: Endpoint.CreateTransportOptions
+    ) {
 		//Init emitter
 		super();
 
@@ -128,7 +170,6 @@ class Transport extends Emitter
 			throw new Error("You must provide remote ice and dtls info");
 		
 		//Store remote properties
-		/** @type {import("./Endpoint").ParsedPeerInfo} */
 		this.remote = { ...remote, candidates: [] };
 		
 		//Create local info
@@ -144,10 +185,11 @@ class Transport extends Emitter
 		properties.SetStringProperty("ice.remotePassword"	, String(this.remote.ice.getPwd()));
 
 		//Put remote dtls properties
-		if (options?.prefferDTLSSetupActive && remote.dtls.getSetup() == Setup.ACTPASS)
+		if (options?.prefferDTLSSetupActive && remote.dtls.getSetup() == Setup.ACTPASS) {
 			properties.SetStringProperty("dtls.setup"	, String(Setup.toString(Setup.PASSIVE)));
-		else
+		} else {
 			properties.SetStringProperty("dtls.setup"	, String(Setup.toString(remote.dtls.getSetup())));
+		}
 		properties.SetStringProperty("dtls.hash"		, String(remote.dtls.getHash()));
 		properties.SetStringProperty("dtls.fingerprint"		, String(remote.dtls.getFingerprint()));
 		
@@ -156,9 +198,10 @@ class Transport extends Emitter
 		properties.SetStringProperty("srtpProtectionProfiles"	, String(options.srtpProtectionProfiles));
 
 		//If disabling REMB calculus
-		if (!!options.disableREMB)
+		if (!!options.disableREMB) {
 			//Override it
 			properties.SetBooleanProperty("remb.disabled"	, true);
+		}
 		
 		//Create username
 		this.username = this.local.ice.getUfrag() + ":" + this.remote.ice.getUfrag();
@@ -166,12 +209,11 @@ class Transport extends Emitter
 		//Store bundle
 		this.bundle = bundle;
 		//No state yet
-		/** @type {DTLSState} */
 		this.dtlsState = "new";
 		//Create native onnection
-		this.connection = SharedPointer(bundle.AddICETransport(this.username,properties));
+		this.connection = SharedPointer.SharedPointer(bundle.AddICETransport(this.username,properties));
 		//Get transport
-		this.transport = SharedPointer(this.connection.transport);
+		this.transport = SharedPointer.SharedPointer(this.connection.transport);
 
 		//If overriding the bwe
 		if (!!options.overrideBWE)
@@ -183,25 +225,20 @@ class Transport extends Emitter
 			this.emit("icetimeout", this);
 		};
 		//Event listener for dtls state changes
-		this.ondtlsstate = (/** @type {DTLSState} */ state) => {
+		this.ondtlsstate = (state: DTLSState) => {
 			//Store dtls state
 			this.dtlsState = state;
 			this.emit("dtlsstate",state, this);
 		};
 		//Event listener for ice candidate activation
-		this.onremoteicecandidate = (
-			/** @type {string} */ ip,
-			/** @type {number} */ port,
-			/** @type {number} */ priority,
+		this.onremoteicecandidate = (ip: string, port: number, priority: number,
 		) => {
 			this.emit("remoteicecandidate", new CandidateInfo("1", 1, "UDP", priority, ip, port, "host"), this);
 		};
 
-		this.onunsignaledincomingsourcegroup = (
-			/** @type Native.RTPIncomingSourceGroupShared*/ group
-		) => {
+		this.onunsignaledincomingsourcegroup = (group: Native.RTPIncomingSourceGroupShared) => {
 			//Create shared pointer wrapper
-			const shared = SharedPointer(group);
+			const shared = SharedPointer.SharedPointer(group);
 			//Get group mid
 			const mid = shared.mid;
 			const encodingId = shared.rid;
@@ -251,11 +288,7 @@ class Transport extends Emitter
 		this.transport.SetListener(this.listener);
 		
 		//Event listener for sender side estimator
-		this.ontargetbitrate = (
-			/** @type {number} */ targetBitrate,
-			/** @type {number} */ bandwidthEstimation,
-			/** @type {number} */ totalBitrate,
-		)  => {
+		this.ontargetbitrate = (targetBitrate:number,bandwidthEstimation: number,totalBitrate: number)  => {
 			//Store sender side estimator
 			this.senderSideTargetBitrate = targetBitrate;
 			this.senderSideEstimationBitrate = bandwidthEstimation;
@@ -274,11 +307,11 @@ class Transport extends Emitter
 		this.addRemoteCandidates(remote.candidates || []);
 		
 		//List of streams
-		this.incomingStreams = /** @type {Map<string, IncomingStream>} */ (new Map());
-		this.outgoingStreams = /** @type {Map<string, OutgoingStream>} */ (new Map());
+		this.incomingStreams = new Map<string, IncomingStream>();
+		this.outgoingStreams = new Map<string, OutgoingStream>();
 		//LIst of tracks
-		this.incomingStreamTracks = /** @type {Map<string, IncomingStreamTrack>} */ (new Map());
-		this.outgoingStreamTracks = /** @type {Map<string, OutgoingStreamTrack>} */ (new Map());
+		this.incomingStreamTracks = new Map<string, IncomingStreamTrack>();
+		this.outgoingStreamTracks = new Map<string, OutgoingStreamTrack>();
 		
 		//Create new sequence generator
 		this.lfsr = new LFSR();
@@ -289,7 +322,7 @@ class Transport extends Emitter
 	 * @param {String} filename - Filename of the pcap file
 	 * @param {TransportDumpOptions} [options]  - Dump parameters
 	 */
-	dump(filename,options) 
+	dump(filename: string, options?: TransportDumpOptions): void
 	{
 		//Get what do we want to dump
 		const incoming		= options ? Boolean(options.incoming) : true;
@@ -317,7 +350,7 @@ class Transport extends Emitter
 	/**
 	 * Stop dumping transport rtp and rtcp packets
 	 */
-	stopDump()
+	stopDump(): void
 	{
 		//Stop
 		if (this.dumping)
@@ -330,11 +363,11 @@ class Transport extends Emitter
 	 * Get transport stats
 	 * @return {TransportStats} stats
 	 */
-	getStats()
+	getStats(): TransportStats
 	{
 		return {
-			senderSideEstimationBitrate	: this.senderSideEstimationBitrate,
-			senderSideTargetBitrate		: this.senderSideTargetBitrate,
+			senderSideEstimationBitrate	: this.senderSideEstimationBitrate!,
+			senderSideTargetBitrate		: this.senderSideTargetBitrate!,
 			ice : this.connection ? {
 				requestsSent		: this.connection.iceRequestsSent,
 				requestsReceived	: this.connection.iceRequestsReceived,
@@ -350,7 +383,7 @@ class Transport extends Emitter
 	 * @param {SemanticSDP.ICEInfoLike}  [localICE_] Local ICE info, containing the username and password
 	 * @returns {ICEInfo}	Local ICE info
 	 */
-	restartICE(remoteICE_, localICE_)
+	restartICE(remoteICE_: ICEInfoLike, localICE_: ICEInfoLike): ICEInfo
 	{
 		//Support both plain js object and SDPInfo
 		const remoteICE = ICEInfo.expand(remoteICE_);
@@ -393,7 +426,7 @@ class Transport extends Emitter
 	 * Get ICE username
 	 * @returns {string} 
 	 */
-	getICEUsername()
+	getICEUsername(): string
 	{
 		return this.username;
 	}
@@ -402,7 +435,7 @@ class Transport extends Emitter
 	 * Get available outgoing bitrate in bps.
 	 * @returns {Number} 
 	 */
-	getAvailableOutgoingBitrate()
+	getAvailableOutgoingBitrate(): number
 	{
 		return this.transport.GetAvailableOutgoingBitrate();
 	}
@@ -411,7 +444,7 @@ class Transport extends Emitter
 	 * Get bandwidth estimation in bps.
 	 * @returns {Number} 
 	 */
-	getEstimatedBitrate()
+	getEstimatedBitrate(): number
 	{
 		return this.transport.GetEstimatedOutgoingBitrate();
 	}
@@ -420,7 +453,7 @@ class Transport extends Emitter
 	 * Get current sent bitrate
 	 * @returns {Number} 
 	 */
-	getTotalSentBitrate()
+	getTotalSentBitrate(): number
 	{
 		return this.transport.GetTotalSentBitrate();
 	}
@@ -432,7 +465,7 @@ class Transport extends Emitter
 	 * Note that this will only work on browsers that supports RTX and transport wide cc.
 	 * @param {boolean} probe
 	 */
-	setBandwidthProbing(probe)
+	setBandwidthProbing(probe: boolean): void
 	{
 		//Do not call native code if setting the same value
 		if (Boolean(probe)===this.bandwidthProbing)
@@ -447,10 +480,10 @@ class Transport extends Emitter
 	 * Set the maximum bitrate to be used if probing is enabled.
 	 * @param {Number} bitrate bitrate in bps
 	 */
-	setMaxProbingBitrate(bitrate)
+	setMaxProbingBitrate(bitrate: number): void
 	{
 		//Set value
-		this.transport.SetMaxProbingBitrate(Math.max(parseInt(bitrate) || 0, 0));
+		this.transport.SetMaxProbingBitrate(Math.max(bitrate || 0, 0));
 	}
 
 
@@ -458,7 +491,7 @@ class Transport extends Emitter
 	 * Enable or disable calculation of sender side estimation if transport wide cc has been negotiated
 	 * @param {Boolean} enabled
 	 */
-	enableSenderSideEstimation(enabled)
+	enableSenderSideEstimation(enabled: boolean): void
 	{
 		//Set value
 		this.transport.EnableSenderSideEstimation(!!enabled);
@@ -469,27 +502,27 @@ class Transport extends Emitter
 	 * Override the bitrate sent by REMB to the remote sender. The transport must be constructed with the override bwe option, and transport wide cc must not be offered.
 	 * @param {Number} bitrate
 	 */
-	setRemoteOverrideBitrate(bitrate)
+	setRemoteOverrideBitrate(bitrate: number): void
 	{
 		//Set value
-		this.transport.SetRemoteOverrideBitrate(Math.max(parseInt(bitrate) || 0, 0));
+		this.transport.SetRemoteOverrideBitrate(Math.max(bitrate || 0, 0));
 	}
 	
 	/**
 	 * Do not allow probing to increase sent bitrate above certain limit
 	 * @param {Number} bitrate limit
 	 */
-	setProbingBitrateLimit(bitrate)
+	setProbingBitrateLimit(bitrate: number): void
 	{
 		//Set value
-		this.transport.SetProbingBitrateLimit(Math.max(parseInt(bitrate) || 0, 0));
+		this.transport.SetProbingBitrateLimit(Math.max(bitrate || 0, 0));
 	}
 	
 	/**
 	 * Set local RTP properties 
 	 * @param {Utils.RTPProperties | SDPInfo} rtp
 	 */
-	setLocalProperties(rtp)
+	setLocalProperties(rtp: Utils.RTPProperties | SDPInfo): void
 	{
 		//Get native properties
 		let properties = Utils.convertRTPProperties(Utils.parseRTPProperties(rtp));
@@ -501,7 +534,7 @@ class Transport extends Emitter
 	 * Set remote RTP properties 
 	 * @param {Utils.RTPProperties | SDPInfo} rtp
 	 */
-	setRemoteProperties(rtp)
+	setRemoteProperties(rtp: Utils.RTPProperties | SDPInfo): void
 	{
 		const parsed = Utils.parseRTPProperties(rtp);
 		//Get native properties
@@ -532,7 +565,7 @@ class Transport extends Emitter
 	 * Get current dtls state for transport
 	 * @returns {DTLSState}
 	 */
-	getDTLSState()
+	getDTLSState(): DTLSState
 	{
 		return this.dtlsState;
 	}
@@ -541,7 +574,7 @@ class Transport extends Emitter
 	 * Get transport local DTLS info
 	 * @returns {DTLSInfo} DTLS info object
 	 */
-	getLocalDTLSInfo()
+	getLocalDTLSInfo(): DTLSInfo
 	{
 		return this.local.dtls;
 	}
@@ -550,7 +583,7 @@ class Transport extends Emitter
 	 * Get transport local ICE info
 	 * @returns {ICEInfo} ICE info object
 	 */
-	getLocalICEInfo()
+	getLocalICEInfo(): ICEInfo
 	{
 		return this.local.ice;
 	}
@@ -559,7 +592,7 @@ class Transport extends Emitter
 	 * Get local ICE candidates for this transport
 	 * @returns {Array<CandidateInfo>}
 	 */
-	getLocalCandidates() 
+	getLocalCandidates(): CandidateInfo[] 
 	{
 		//Return local host candiadate as array
 		return this.local.candidates;
@@ -569,7 +602,7 @@ class Transport extends Emitter
 	 * Get transport remote DTLS info
 	 * @returns {DTLSInfo} DTLS info object
 	 */
-	getRemoteDTLSInfo()
+	getRemoteDTLSInfo(): DTLSInfo
 	{
 		return this.remote.dtls;
 	}
@@ -578,7 +611,7 @@ class Transport extends Emitter
 	 * Get transport remote ICE info
 	 * @returns {ICEInfo} ICE info object
 	 */
-	getRemoteICEInfo()
+	getRemoteICEInfo(): ICEInfo
 	{
 		return this.remote.ice;
 	}
@@ -587,7 +620,7 @@ class Transport extends Emitter
 	 * Get remote ICE candidates for this transport
 	 * @returns {Array<CandidateInfo>}
 	 */
-	getRemoteCandidates() 
+	getRemoteCandidates(): CandidateInfo[] 
 	{
 		//Return local host candiadate as array
 		return this.remote.candidates;
@@ -598,16 +631,14 @@ class Transport extends Emitter
 	 * @param {CandidateInfo} candidate
 	 * @returns {boolean} Wheter the remote ice candidate was alrady presnet or not
 	 */
-	addRemoteCandidate(candidate) 
+	addRemoteCandidate(candidate: CandidateInfo): boolean
 	{
 		//Check transport
 		if (candidate.getTransport().toLowerCase()!="udp")
 			return false;
 
-		/** @type {string} */
-		let ip;
-		/** @type {number} */
-		let port;
+		let ip: string;
+		let port: number;
 		
 		//If it is a relay candidate
 		if ("relay"===candidate.getType())
@@ -641,7 +672,7 @@ class Transport extends Emitter
 		return true;
 	}
 
-	async setCandidateRawTxData(/** @type {string} */ ip, /** @type {number} */ port)
+	async setCandidateRawTxData(ip: string, port: number): Promise<void>
 	{
 		const ifindex = this.bundle.rawTxInterface;
 		if (ifindex === undefined)
@@ -658,7 +689,7 @@ class Transport extends Emitter
 	 * Register an array remote candidate info. Only needed for ice-lite to ice-lite endpoints
 	 * @param {Array<CandidateInfo>} candidates
 	 */
-	addRemoteCandidates(candidates)
+	addRemoteCandidates(candidates: CandidateInfo[]): void
 	{
 		//For each
 		for (const candidate of candidates)
@@ -671,15 +702,14 @@ class Transport extends Emitter
 	 * @param {CreateStreamOptions | SemanticSDP.StreamInfoLike | String} [params] Params plain object, StreamInfo object or stream id
 	 * @returns {OutgoingStream} The new outgoing stream
 	 */
-	createOutgoingStream(params) 
+	createOutgoingStream(params?: CreateStreamOptions | StreamInfo | string): OutgoingStream
 	{
-		/** @type {StreamInfo} */
-		let streamInfo;
+		let streamInfo: StreamInfo;
 		//Generate the stream info from paramss
 		if (params && params.constructor.name === "StreamInfo")
 		{
 			//Convert
-			streamInfo = StreamInfo.clone(/** @type {StreamInfo} */ (params));
+			streamInfo = StreamInfo.clone((params as StreamInfo));
 		} else if (typeof params === 'string') {
 			//Param is the media id
 			streamInfo = new StreamInfo(params);
@@ -697,7 +727,7 @@ class Transport extends Emitter
 			throw new Error("Duplicated stream id");
 
 		// from here on, we can assume `params` holds the plain object
-		params = /** @type {CreateStreamOptions} */ (params);
+		params = (params as CreateStreamOptions);
 
 		//If we have audio
 		if (params && params.audio)
@@ -711,10 +741,10 @@ class Transport extends Emitter
 				//Crete new track
 				let track = new TrackInfo("audio", audio.id || ("audio" + (maxId++)));
 				//Set mid
-				track.setMediaId(audio.mediaId);
+				track.setMediaId(audio.mediaId!);
 				//Generte new ssrc
-				let ssrc = audio.ssrcs ? audio.ssrcs.media : this.lfsr.seq(31);
-				let rtx  = audio.ssrcs ? audio.ssrcs.rtx   : this.lfsr.seq(31);
+				let ssrc = audio.ssrcs ? (Array.isArray(audio.ssrcs) ? audio.ssrcs[0] : audio.ssrcs.media) : this.lfsr.seq(31);
+				let rtx  = audio.ssrcs ? (Array.isArray(audio.ssrcs) ? audio.ssrcs[1] : audio.ssrcs.rtx)   : this.lfsr.seq(31);
 				//Add to track
 				track.addSSRC(ssrc);
 
@@ -743,11 +773,11 @@ class Transport extends Emitter
 				//Crete new track
 				let track = new TrackInfo("video", video.id || ("video" + (maxId++)));
 				//Set mid
-				track.setMediaId(video.mediaId);
+				track.setMediaId(video.mediaId!);
 				//Generte new ssrc
-				let ssrc = video.ssrcs ? video.ssrcs.media : this.lfsr.seq(31);
-				let fec  = video.ssrcs ? video.ssrcs.fec   : this.lfsr.seq(31);
-				let rtx  = video.ssrcs ? video.ssrcs.rtx   : this.lfsr.seq(31);
+				let ssrc = video.ssrcs ? (Array.isArray(video.ssrcs) ? video.ssrcs[0] : video.ssrcs.media) : this.lfsr.seq(31);
+				let fec  = video.ssrcs ? (Array.isArray(video.ssrcs) ? video.ssrcs[1] : video.ssrcs.fec)   : this.lfsr.seq(31);
+				let rtx  = video.ssrcs ? (Array.isArray(video.ssrcs) ? video.ssrcs[2] : video.ssrcs.rtx)   : this.lfsr.seq(31);
 
 				//Add main ssrc to track
 				track.addSSRC(ssrc);
@@ -770,12 +800,13 @@ class Transport extends Emitter
 				if (video.encodings)
 					track.addEncoding(SemanticSDP.TrackEncodingInfo.expand(video.encodings[0][0]));
 
-				if (video.rid != undefined)
+				// todo: find why rid is not in the typings
+				if ((video as any).rid != undefined)
 				{
 					//Create encoding
-					const encoding = new SemanticSDP.TrackEncodingInfo(video.rid);
+					const encoding = new SemanticSDP.TrackEncodingInfo((video as any).rid);
 					//Add ssrc
-					encoding.addParam("ssrc", ssrc)
+					encoding.addParam("ssrc", ssrc.toString())
 					//Add to encodngs
 					track.addAlternativeEncodings([
 						encoding
@@ -815,12 +846,12 @@ class Transport extends Emitter
 	 * @param {OutgoingStream} [outgoingStream] outgoingStream Outgoing stream to add the track to, if any
 	 * @returns {OutgoingStreamTrack} The new outgoing stream track
 	 */
-	createOutgoingStreamTrack(media, params, outgoingStream)
+	createOutgoingStreamTrack(media: TrackType, params: CreateStreamTrackOptions | SemanticSDP.TrackInfoLike, outgoingStream?: OutgoingStream): OutgoingStreamTrack
 	{
 		const trackInfo = params
 			? TrackInfo.expand(Object.assign({
 				id : String(media + (maxId++))
-			}, params))
+			}, {media: media }, params))
 			: new TrackInfo(media, String(media + (maxId++)));
 
 		//Create uuid
@@ -845,7 +876,7 @@ class Transport extends Emitter
 		const encodingSource = encodingSources[0];
 
 		//Create incoming track
-		const source = SharedPointer(new Native.RTPOutgoingSourceGroupShared(
+		const source = SharedPointer.SharedPointer(new Native.RTPOutgoingSourceGroupShared(
 			mediaId,
 			Utils.mediaToFrameType(media),
 			this.transport.GetTimeService())
@@ -919,10 +950,9 @@ class Transport extends Emitter
 	 * @param {StreamInfo | SemanticSDP.StreamInfoPlain | String} params Contains the ids and ssrcs of the stream to be created, or a plain stream id
 	 * @returns {IncomingStream} The newly created incoming stream object
 	 */
-	createIncomingStream(params)
+	createIncomingStream(params: StreamInfo | SemanticSDP.StreamInfoPlain | string): IncomingStream
 	{
-		/** @type {StreamInfo}  Convert to StreamInfo*/
-		const info = typeof params == "string" 
+		const info: StreamInfo = typeof params == "string" 
 			? new StreamInfo(params)
 			: StreamInfo.clone(params);
 
@@ -966,7 +996,7 @@ class Transport extends Emitter
 	 * Get all the incoming streams in the transport
 	 * @returns {IncomingStream[]}
 	 */
-	getIncomingStreams()
+	getIncomingStreams(): IncomingStream[]
 	{
 		return Array.from(this.incomingStreams.values());
 	}
@@ -976,7 +1006,7 @@ class Transport extends Emitter
 	 * @param {String} streamId the stream ID
 	 * @returns {IncomingStream | undefined}
 	 */
-	getIncomingStream(streamId)
+	getIncomingStream(streamId: string): IncomingStream | undefined
 	{
 		//Return it
 		return this.incomingStreams.get(streamId);
@@ -986,7 +1016,7 @@ class Transport extends Emitter
 	 * Get all the outgoing streams in the transport
 	 * @returns {OutgoingStream[]}
 	 */
-	getOutgoingStreams()
+	getOutgoingStreams(): OutgoingStream[]
 	{
 		return Array.from(this.outgoingStreams.values());
 	}
@@ -996,7 +1026,7 @@ class Transport extends Emitter
 	 * @param {String} streamId the stream ID
 	 * @returns {OutgoingStream | undefined}
 	 */
-	getOutgoingStream(streamId)
+	getOutgoingStream(streamId: string): OutgoingStream | undefined
 	{
 		//Return it
 		return this.outgoingStreams.get(streamId);
@@ -1009,10 +1039,9 @@ class Transport extends Emitter
 	 * @param {IncomingStream} [incomingStream] Stream to add the track to, if any
 	 * @returns {IncomingStreamTrack} The new incoming stream track
 	 */
-	createIncomingStreamTrack(media, params, incomingStream)
+	createIncomingStreamTrack(media: TrackType, params?: TrackInfoLike, incomingStream?: IncomingStream): IncomingStreamTrack
 	{
-		/** @type TrackInfo */
-		const trackInfo = params
+		const trackInfo: TrackInfo = params
 			? TrackInfo.expand(params) 
 			: new TrackInfo(media, String(media + (maxId++)));
 	
@@ -1025,8 +1054,7 @@ class Transport extends Emitter
 			throw new Error("Duplicated track id");
 		
 		//Create source map
-		/** @type {IncomingStreamTrack.NativeSourceMap} */
-		const sources = {};
+		const sources: NativeSourceMap = {};
 
 		try 
 		{
@@ -1034,7 +1062,7 @@ class Transport extends Emitter
 			for (const encodingSource of trackInfo.getEncodingSources())
 			{
 				//Create native source
-				const source = SharedPointer(new Native.RTPIncomingSourceGroupShared(
+				const source = SharedPointer.SharedPointer(new Native.RTPIncomingSourceGroupShared(
 					Utils.mediaToFrameType(media),
 					this.transport.GetTimeService())
 				);
@@ -1066,7 +1094,7 @@ class Transport extends Emitter
 					throw new Error("Could not add incoming source group to native transport");
 				
 				//Add to sources
-				sources[encodingSource.id] = source;
+				sources[encodingSource.id!] = source;
 			}
 		} catch (e) {
 			//For each source
@@ -1083,7 +1111,7 @@ class Transport extends Emitter
 			trackInfo.getId(),
 			trackInfo.getMediaId(),
 			this.transport.GetTimeService(),
-			SharedPointer(this.transport.toRTPReceiver()),
+			SharedPointer.SharedPointer(this.transport.toRTPReceiver()),
 			sources
 		);
 
@@ -1115,7 +1143,7 @@ class Transport extends Emitter
 	 * @param {IncomingStream} incomingStream the incoming stream to be published in this transport
 	 * @returns {OutgoingStream} The new outgoing stream
 	 */
-	publish(incomingStream) 
+	publish(incomingStream: IncomingStream): OutgoingStream
 	{
 		//Create new incoming stream
 		let outgoingStream = this.createOutgoingStream ({
@@ -1133,7 +1161,7 @@ class Transport extends Emitter
 	/**
 	 * Stop transport and all the associated incoming and outgoing streams
 	 */
-	stop()
+	stop(): void
 	{
 		//Don't call it twice
 		if (this.stopped) return;
@@ -1142,31 +1170,36 @@ class Transport extends Emitter
 		this.stopped = true;
 		
 		//Stop all streams
-		for (let stream of this.incomingStreams.values())
-			//stop
+		for (let stream of this.incomingStreams.values()) {
 			stream.stop();
+		}
+
 		//Stop all streams
-		for (let stream of this.outgoingStreams.values())
-			//stop
+		for (let stream of this.outgoingStreams.values()) {
 			stream.stop();
+		}
+
 		//Clear maps jic
 		this.incomingStreams.clear();
 		this.outgoingStreams.clear();
 		
 		//Stop all tracks
-		for (let track of this.incomingStreamTracks.values())
-			//stopincomingStreamsTracks
+		for (let track of this.incomingStreamTracks.values()) {
 			track.stop();
+		}
+
 		//Stop all tracks
-		for (let track of this.outgoingStreamTracks.values())
-			//stop
+		for (let track of this.outgoingStreamTracks.values()) {
 			track.stop();
+		}
+
 		//Clear maps jic
 		this.incomingStreamTracks.clear();
 		this.outgoingStreamTracks.clear();
 
 		//Remove dtls listener
-		this.transport.SetListener(/** @type {any} */ (null));
+		//@ts-expect-error
+		this.transport.SetListener(null);
 		
 		//Remove transport/connection from bundle, DO NOT USE them later on
 		this.bundle.RemoveICETransport(this.username);
@@ -1200,6 +1233,3 @@ class Transport extends Emitter
 		this.bundle = null;
 	}
 }
-
-
-module.exports = Transport;

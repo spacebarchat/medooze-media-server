@@ -1,45 +1,41 @@
-const Native			= require("./Native");
-const SharedPointer		= require("./SharedPointer");
-const Emitter		= require("medooze-event-emitter");
-const IncomingStreamTrack	= require("./IncomingStreamTrack");
-const OutgoingStreamTrack	= require("./OutgoingStreamTrack");
-const Utils			= require("./Utils");
-const SemanticSDP		= require("semantic-sdp");
-const LFSR			= require('lfsr');
-const {
-	MediaInfo,
-} = require("semantic-sdp");
+import * as Native from "./Native";
+import * as SharedPointer from "./SharedPointer";
+import Emitter from "medooze-event-emitter";
+import {IncomingStreamTrack} from "./IncomingStreamTrack";
+import {OutgoingStreamTrack} from "./OutgoingStreamTrack";
+import * as Utils from "./Utils";
+import { MediaInfo } from "semantic-sdp";
+import LFSR from 'lfsr';
 
-//@ts-expect-error
-const parseInt = /** @type {(x: number) => number} */ (global.parseInt);
+export interface StreamerSessionOptions {
+	/** Local parameters */
+    local?: { port: number };
+	/** Remote parameters */
+    remote?: { ip: string, port: number };
+	/** Disable sending rtcp */
+    noRTCP?: number;
+}
 
-
-/**
- * @typedef {Object} StreamerSessionOptions
- * @property {{ port: number }} [local] Local parameters
- * @property {{ ip: string, port: number }} [remote] Remote parameters
- * @property {number} [noRTCP] Disable sending rtcp
- */
-
-/**
- * @typedef {Object} StreamerSessionEvents
- * @property {(self: StreamerSession) => void} stopped
- */
+interface StreamerSessionEvents {
+    stopped: (self: StreamerSession) => void;
+}
 
 /**
  * Represent the connection between a local udp port and a remote one. It sends and/or receive plain RTP data.
  * @extends {Emitter<StreamerSessionEvents>}
  */
-class StreamerSession extends Emitter
+export class StreamerSession extends Emitter<StreamerSessionEvents>
 {
-	/**
-	 * @ignore
-	 * @hideconstructor
-	 * @param {MediaInfo} media 
-	 * @param {StreamerSessionOptions} [params]
-	 * private constructor
-	 */
-	constructor(media, params)
+	lfsr: LFSR;
+    session: SharedPointer.Proxy<Native.RTPSessionFacadeShared>;
+    incoming: IncomingStreamTrack;
+    outgoing: OutgoingStreamTrack;
+
+    /**
+     * @param media - Media information 
+     * @param params - Optional session parameters
+     */
+    constructor(media: MediaInfo, params?: StreamerSessionOptions)
 	{
 		//Init emitter
 		super();
@@ -52,16 +48,16 @@ class StreamerSession extends Emitter
 			throw new Error("application media not supported");
 
 		//Create session
-		this.session = SharedPointer(new Native.RTPSessionFacadeShared(Utils.mediaToFrameType(mediaType)));
+		this.session = SharedPointer.SharedPointer(new Native.RTPSessionFacadeShared(Utils.mediaToFrameType(mediaType)));
 		//Set local params
 		if (params && params.local && params.local.port)
 			//Set it
-			this.session.SetLocalPort(parseInt(params.local.port));
+			this.session.SetLocalPort(params.local.port);
 		
 		//Set remote params
 		if (params && params.remote && params.remote.ip && params.remote.port)
 			//Set them
-			this.session.SetRemotePort(String(params.remote.ip), parseInt(params.remote.port));
+			this.session.SetRemotePort(String(params.remote.ip), params.remote.port);
 		
 		//Create new native properties object
 		let properties = new Native.Properties();
@@ -77,11 +73,11 @@ class StreamerSession extends Emitter
 				let item = "codecs."+num;
 				//Put codec
 				properties.SetStringProperty(item+".codec"	, String(codec.getCodec()));
-				properties.SetIntegerProperty(item+".pt"	, parseInt(codec.getType()));
+				properties.SetIntegerProperty(item+".pt"	, codec.getType());
 				//If it has rtx
 				if (codec.rtx)
 					//Set rtx
-					properties.SetIntegerProperty(item+".rtx", parseInt(codec.getRTX()));
+					properties.SetIntegerProperty(item+".rtx", codec.getRTX());
 				//one more
 				num++;
 			}
@@ -102,8 +98,8 @@ class StreamerSession extends Emitter
 		this.session.Init(properties);
 		
 		//Create incoming and outgoing tracks
-		this.incoming = new IncomingStreamTrack(mediaType, media.getType(), "", this.session.GetTimeService(), SharedPointer(this.session.toRTPReceiver()), {'':SharedPointer(this.session.GetIncomingSourceGroup())});
-		this.outgoing = new OutgoingStreamTrack(mediaType, media.getType(), "", this.session.toRTPSender(), SharedPointer(this.session.GetOutgoingSourceGroup())); 
+		this.incoming = new IncomingStreamTrack(mediaType, media.getType(), "", this.session.GetTimeService(), SharedPointer.SharedPointer(this.session.toRTPReceiver()), {'':SharedPointer.SharedPointer(this.session.GetIncomingSourceGroup())});
+		this.outgoing = new OutgoingStreamTrack(mediaType, media.getType(), "", this.session.toRTPSender(), SharedPointer.SharedPointer(this.session.GetOutgoingSourceGroup())); 
 		
 		//Try to get h264 codec
 		const h264 = media.getCodec("h264");
@@ -128,7 +124,7 @@ class StreamerSession extends Emitter
 	 * Get the local rtp/udp port
 	 * @returns {Number} port number
 	 */
-	getLocalPort()
+	getLocalPort(): number
 	{
 		return this.session.GetLocalPort();
 	}
@@ -136,10 +132,10 @@ class StreamerSession extends Emitter
 	/**Set the rempte rtp/udp ip and port
 	 * 
 	 */
-	setRemote(/** @type {string} */ ip, /** @type {number} */ port)
+	setRemote(ip: string, port: number): void
 	{
 		//Set them
-		this.session.SetRemotePort(String(ip),parseInt(port));
+		this.session.SetRemotePort(String(ip),port);
 	}
 		
 	
@@ -147,7 +143,7 @@ class StreamerSession extends Emitter
 	 * Returns the incoming stream track associated with this streaming session
 	 * @returns {IncomingStreamTrack}
 	 */
-	getIncomingStreamTrack()
+	getIncomingStreamTrack(): IncomingStreamTrack
 	{
 		return this.incoming;
 	}
@@ -156,7 +152,7 @@ class StreamerSession extends Emitter
 	 * Returns the outgoing stream track associated with this streaming session
 	 * @returns {OutgoingStreamTrack}
 	 */
-	getOutgoingStreamTrack()
+	getOutgoingStreamTrack(): OutgoingStreamTrack
 	{
 		return this.outgoing;
 	}
@@ -164,7 +160,7 @@ class StreamerSession extends Emitter
 	/**
 	 * Closes udp socket and frees resources
 	 */
-	stop()
+	stop(): void
 	{
 		//Don't call it twice
 		if (!this.session) return;
@@ -182,9 +178,7 @@ class StreamerSession extends Emitter
 		super.stop();
 		
 		//Remove transport reference, so destructor is called on GC
-		/** @type {any} */ (this).session = null;
+		(this as any).session = null;
 	}
 	
 }
-
-module.exports = StreamerSession;
