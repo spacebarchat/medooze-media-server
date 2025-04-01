@@ -14,7 +14,7 @@ Supported systems:
  
 Just add the Medooze media server as a dependency to your node project:
 ```
-    npm i --save medooze-media-server
+    npm i --save @dank074/medooze-media-server
 ```
 ## Distribution
 
@@ -36,7 +36,7 @@ To use it on your project just install it instead of the npm repository dependen
 
 ## Usage
 ```javascript
-const MediaServer = require('medooze-media-server');
+const MediaServer = require('@dank074/medooze-media-server');
 ```
 ## API Documention
 You can check the full object documentation in [markdown](api.md) or [html](https://medooze.github.io/media-server-node/).
