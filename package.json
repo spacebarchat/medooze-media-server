@@ -1,11 +1,10 @@
 {
   "name": "@dank074/medooze-media-server",
-  "version": "1.156.22",
+  "version": "1.156.3",
   "description": "WebRTC Media Server by Medooze",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "prepare": "mkdir -p build/src && cp src/*.d.ts build/src",
     "check": "tsc --noEmit --emitDeclarationOnly false",
     "configure": "node-gyp configure",
     "swig": "swig -javascript -node -c++ -I`node -e \"require('medooze-media-server-src')\"`/include src/media-server.i",
