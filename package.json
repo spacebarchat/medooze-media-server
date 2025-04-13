@@ -1,6 +1,6 @@
 {
   "name": "@dank074/medooze-media-server",
-  "version": "1.156.3",
+  "version": "1.156.4",
   "description": "WebRTC Media Server by Medooze",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -9,8 +9,9 @@
     "configure": "node-gyp configure",
     "swig": "swig -javascript -node -c++ -I`node -e \"require('medooze-media-server-src')\"`/include src/media-server.i",
     "build": "node-gyp build --jobs=max",
+    "rebuild": "node-gyp configure && node-gyp rebuild --jobs=max",
     "build:ts": "tsc",
-    "install": "test -f build/Release/medooze-media-server.node || (node-gyp configure && node-gyp rebuild --jobs=max && npm run prepare)",
+    "install": "test -f build/Release/medooze-media-server.node || (node-gyp configure && node-gyp rebuild --jobs=max)",
     "docs": "documentation build dist/MediaServer.js dist/*.js --shallow -o docs -f html && documentation build dist/MediaServer.js dist/*.js --shallow -o api.md -f md --markdown-toc false",
     "dist": "npm run configure && npm run build && npm run prepare && mkdir -p dist && tar cvzf dist/medooze-media-server-`node -e 'console.log(require(\"./package.json\").version)'`.tgz `([ \"$(uname)\" = 'Darwin' ] && echo \"-s |^|medooze-media-server/|\") || echo \" --transform=flags=r;s|^|medooze-media-server/|\"` package.json dist/index.js dist/index.d.ts build/types README.md lib/* build/Release/medooze-media-server.node",
     "test": "tap tests/*.js  --show-full-coverage --allow-incomplete-coverage --jobs=1 --reporter tap",
