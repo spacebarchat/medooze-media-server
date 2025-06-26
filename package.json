@@ -1,6 +1,6 @@
 {
     "name": "@spacebarchat/medooze-media-server",
-    "version": "1.156.4",
+    "version": "1.156.5",
     "description": "WebRTC Media Server",
     "main": "dist/index.js",
     "types": "dist/index.d.ts",
