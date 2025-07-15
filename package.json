@@ -15,7 +15,8 @@
         "docs": "documentation build dist/MediaServer.js dist/*.js --shallow -o docs -f html && documentation build dist/MediaServer.js dist/*.js --shallow -o api.md -f md --markdown-toc false",
         "dist": "npm run configure && npm run build && npm run prepare && mkdir -p dist && tar cvzf dist/medooze-media-server-`node -e 'console.log(require(\"./package.json\").version)'`.tgz `([ \"$(uname)\" = 'Darwin' ] && echo \"-s |^|medooze-media-server/|\") || echo \" --transform=flags=r;s|^|medooze-media-server/|\"` package.json dist/index.js dist/index.d.ts build/types README.md lib/* build/Release/medooze-media-server.node",
         "test": "tap tests/*.js  --show-full-coverage --allow-incomplete-coverage --jobs=1 --reporter tap",
-        "junit": "tap tests/*.js --show-full-coverage --allow-incomplete-coverage --jobs=1 --reporter junit --reporter-file test_results.xml"
+        "junit": "tap tests/*.js --show-full-coverage --allow-incomplete-coverage --jobs=1 --reporter junit --reporter-file test_results.xml",
+        "prepublishOnly": "npm run build:ts"
     },
     "repository": {
         "type": "git",
@@ -37,7 +38,7 @@
     "dependencies": {
         "lfsr": "0.0.3",
         "medooze-event-emitter": "^1.2.0",
-        "nan": "^2.22.2",
+        "nan": "^2.23.0",
         "semantic-sdp": "^3.31.1",
         "uuid": "^3.3.2"
     },
