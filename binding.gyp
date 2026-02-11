@@ -201,7 +201,9 @@
 											"include_dirs": [  "<(medooze_media_server_src)/ext/crc32c/config/Linux-arm64" ]
 										}],
 										["target_arch=='arm64'",{
-											"include_dirs": [  "<(medooze_media_server_src)/ext/crc32c/config/Linux-aarch64" ]
+											"include_dirs": [  "<(medooze_media_server_src)/ext/crc32c/config/Linux-aarch64" ],
+											"cflags": ["-march=armv8-a+crypto+crc"],
+											"cflags_cc": ["-march=armv8-a+crypto+crc"]
 										}]
 									],
 									"cflags_cc":  [

@@ -186,16 +186,22 @@
 
         # stream list override
         'stream_list.cpp',
-
-        # AES-GCM backend conditional override
-        'gcm_aes_backend.cpp',
-        'gcm_aes_backend-asm.S',
       ],
       'defines': [
         # override stream list
         'SRTP_NO_STREAM_LIST',
       ],
       'conditions': [
+        ['target_arch=="x64" or target_arch=="ia32"', {
+          'sources': [
+            'gcm_aes_backend.cpp',
+            'gcm_aes_backend-asm.S',
+          ],
+        }, {
+          'sources': [
+            'gcm_aes_backend_arm.cpp',
+          ],
+        }],
         ['use_openssl==1', {
           'sources!': [
             'lib/crypto/cipher/aes_cbc.c',
