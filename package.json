@@ -38,7 +38,7 @@
     "dependencies": {
         "lfsr": "0.0.3",
         "medooze-event-emitter": "^1.2.0",
-        "nan": "^2.23.1",
+        "nan": "^2.25.0",
         "semantic-sdp": "^3.31.1",
         "uuid": "^13.0.0"
     },
@@ -52,7 +52,7 @@
         "@types/lfsr": "^0.0.0",
         "@types/node": "^24.8.1",
         "documentation": "14.0.3",
-        "tap": "^21.4.0",
+        "tap": "^21.5.1",
         "typescript": "^5.9.3"
     },
     "publishConfig": {
