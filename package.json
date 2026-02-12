@@ -11,7 +11,7 @@
         "build": "node-gyp build --jobs=max",
         "rebuild": "node-gyp configure && node-gyp rebuild --jobs=max",
         "build:ts": "tsc",
-        "install": "test -f build/Release/medooze-media-server.node || (node-gyp configure && node-gyp rebuild --jobs=max)",
+        "install": "patch-package || test -f build/Release/medooze-media-server.node || (node-gyp configure && node-gyp rebuild --jobs=max)",
         "docs": "documentation build dist/MediaServer.js dist/*.js --shallow -o docs -f html && documentation build dist/MediaServer.js dist/*.js --shallow -o api.md -f md --markdown-toc false",
         "dist": "npm run configure && npm run build && npm run prepare && mkdir -p dist && tar cvzf dist/medooze-media-server-`node -e 'console.log(require(\"./package.json\").version)'`.tgz `([ \"$(uname)\" = 'Darwin' ] && echo \"-s |^|medooze-media-server/|\") || echo \" --transform=flags=r;s|^|medooze-media-server/|\"` package.json dist/index.js dist/index.d.ts build/types README.md lib/* build/Release/medooze-media-server.node",
         "test": "tap tests/*.js  --show-full-coverage --allow-incomplete-coverage --jobs=1 --reporter tap",
@@ -31,7 +31,7 @@
     "author": "Spacebar",
     "contributors": [
         "Sergio Garcia Murillo",
-        "dank074"
+        "s074"
     ],
     "license": "MIT",
     "gypfile": true,
@@ -39,6 +39,7 @@
         "lfsr": "0.0.3",
         "medooze-event-emitter": "^1.2.0",
         "nan": "^2.25.0",
+        "patch-package": "^8.0.1",
         "semantic-sdp": "^3.31.1",
         "uuid": "^13.0.0"
     },
