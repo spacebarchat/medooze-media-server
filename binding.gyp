@@ -24,7 +24,7 @@
 			"cflags_cc": 
 			[
 				"-fexceptions",
-				"-std=c++17",
+				"-std=c++20",
 				"-O3",
 				"-g",
 				"-Wno-unused-function",
