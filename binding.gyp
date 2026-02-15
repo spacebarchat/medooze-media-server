@@ -11,9 +11,8 @@
 			"target_name": "medooze-media-server",
 			"cflags": 
 			[
-				"-march=native",
 				"-fexceptions",
-				"-O3",
+				"-O2",
 				"-g",
 				"-Wno-unused-function -Wno-comment",
 				#"-O0",
@@ -25,7 +24,7 @@
 			[
 				"-fexceptions",
 				"-std=c++20",
-				"-O3",
+				"-O2",
 				"-g",
 				"-Wno-unused-function",
 				#"-O0",
@@ -188,17 +187,9 @@
 									"include_dirs": [  "<(medooze_media_server_src)/ext/crc32c/config/Darwin-i386" ],
 								}],
 								['OS=="linux"',{
-									"variables": {
-										"sse42_support": "<!(cat /proc/cpuinfo | grep -c sse4_2 || true)"
-									},
 									"conditions" : [
 										["target_arch=='x64'",{
-											"conditions"  : [["sse42_support==0",{
-												"include_dirs": [  "<(medooze_media_server_src)/ext/crc32c/config/Linux-x86_64_nosse42" ]
-											},{
-												"include_dirs": [  "<(medooze_media_server_src)/ext/crc32c/config/Linux-x86_64" ]
-											}]],
-											"include_dirs": [  "<(medooze_media_server_src)/ext/crc32c/config/Linux-arm64" ]
+											"include_dirs": [  "<(medooze_media_server_src)/ext/crc32c/config/Linux-x86_64" ]
 										}],
 										["target_arch=='arm64'",{
 											"include_dirs": [  "<(medooze_media_server_src)/ext/crc32c/config/Linux-aarch64" ],
@@ -210,6 +201,9 @@
 										"-faligned-new",
 										"-DHAVE_STD_ALIGNED_ALLOCC",
 									]
+								}],
+								['RULE_INPUT_NAME=="<(medooze_media_server_src)/ext/crc32c/src/crc32c_sse42.cc"',{
+									"cflags_cc": ["-msse4.2"]
 								}]
 						]
 					},
