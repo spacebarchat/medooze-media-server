@@ -11,9 +11,8 @@
 			"target_name": "medooze-media-server",
 			"cflags": 
 			[
-				"-march=native",
 				"-fexceptions",
-				"-O3",
+				"-O2",
 				"-g",
 				"-Wno-unused-function -Wno-comment",
 				#"-O0",
@@ -25,7 +24,7 @@
 			[
 				"-fexceptions",
 				"-std=c++20",
-				"-O3",
+				"-O2",
 				"-g",
 				"-Wno-unused-function",
 				#"-O0",
@@ -189,16 +188,35 @@
 								}],
 								['OS=="linux"',{
 									"variables": {
-										"sse42_support": "<!(cat /proc/cpuinfo | grep -c sse4_2 || true)"
+										"sse42_support": "<!(cat /proc/cpuinfo | grep -c sse4_2 || 0)",
+										"aes_support": "<!(cat /proc/cpuinfo | grep -c aes || 0)"
 									},
 									"conditions" : [
-										["target_arch=='x64'",{
-											"conditions"  : [["sse42_support==0",{
-												"include_dirs": [  "<(medooze_media_server_src)/ext/crc32c/config/Linux-x86_64_nosse42" ]
+										["target_arch=='x64' or target_arch=='ia32'",{
+											"conditions"  : [
+												["sse42_support==0",{
+												"include_dirs": [  "<(medooze_media_server_src)/ext/crc32c/config/Linux-x86_64_nosse42" ],
+												
+												"conditions": [
+													["aes_support!=0", {
+														"cflags": ["-maes" ],
+          												"cflags_cc": ["-maes" ]
+													}]
+												]
 											},{
-												"include_dirs": [  "<(medooze_media_server_src)/ext/crc32c/config/Linux-x86_64" ]
-											}]],
-											"include_dirs": [  "<(medooze_media_server_src)/ext/crc32c/config/Linux-arm64" ]
+												"include_dirs": [  "<(medooze_media_server_src)/ext/crc32c/config/Linux-x86_64" ],
+
+												"conditions": [
+													["aes_support!=0", {
+														"cflags": [ "-msse4.2", "-maes" ],
+          												"cflags_cc": [ "-msse4.2", "-maes" ]
+													},{
+														"cflags": [ "-msse4.2" ],
+          												"cflags_cc": [ "-msse4.2" ]
+													}]
+												]
+											}]
+											]
 										}],
 										["target_arch=='arm64'",{
 											"include_dirs": [  "<(medooze_media_server_src)/ext/crc32c/config/Linux-aarch64" ],
