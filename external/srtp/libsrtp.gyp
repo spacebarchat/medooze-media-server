@@ -132,7 +132,6 @@
     {
       'target_name': 'libsrtp',
       'type': 'static_library',
-      'cflags': ['-flto'],
       'sources': [
         # includes
         'lib/include/srtp.h',
