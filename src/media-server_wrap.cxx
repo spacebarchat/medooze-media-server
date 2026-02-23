@@ -19498,14 +19498,13 @@ void SWIGV8_INIT (SWIGV8_OBJECT exports_obj, SWIGV8_VALUE /*module*/, v8::Local<
   SWIG_InitializeModule(context);
 
 
-	auto tracingVar = getenv("MEDOOZE_TRACING");
-	if (tracingVar && std::string(tracingVar) == "1") {
-		perfetto::TracingInitArgs args;
-		//args.backends |= perfetto::kInProcessBackend;
-		args.backends |= perfetto::kSystemBackend;
-		perfetto::Tracing::Initialize(args);
-		MedoozeTrackEventRegister();
-	}
+#ifdef MEDOOZE_TRACING
+	perfetto::TracingInitArgs args;
+	//args.backends |= perfetto::kInProcessBackend;
+	args.backends |= perfetto::kSystemBackend;
+	perfetto::Tracing::Initialize(args);
+	MedoozeTrackEventRegister();
+#endif
 
 	AesGcmSrtpBackend_Register();
 
