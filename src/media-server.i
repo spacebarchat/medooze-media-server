@@ -103,14 +103,13 @@ using Persistent = Nan::Persistent<T,NonCopyablePersistentTraits<T>>;
 %include "FrameDispatchCoordinator.i"
 
 %init %{
-	auto tracingVar = getenv("MEDOOZE_TRACING");
-	if (tracingVar && std::string(tracingVar) == "1") {
-		perfetto::TracingInitArgs args;
-		//args.backends |= perfetto::kInProcessBackend;
-		args.backends |= perfetto::kSystemBackend;
-		perfetto::Tracing::Initialize(args);
-		MedoozeTrackEventRegister();
-	}
+#ifdef MEDOOZE_TRACING
+	perfetto::TracingInitArgs args;
+	//args.backends |= perfetto::kInProcessBackend;
+	args.backends |= perfetto::kSystemBackend;
+	perfetto::Tracing::Initialize(args);
+	MedoozeTrackEventRegister();
+#endif
 
 	AesGcmSrtpBackend_Register();
 
